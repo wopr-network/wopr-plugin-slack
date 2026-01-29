@@ -1,0 +1,34 @@
+{
+  "name": "wopr-plugin-slack",
+  "version": "1.0.0",
+  "description": "Slack integration for WOPR - Socket Mode and HTTP webhook support",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "wopr",
+    "plugin",
+    "slack",
+    "bot",
+    "chat"
+  ],
+  "author": "TSavo",
+  "license": "MIT",
+  "dependencies": {
+    "@slack/bolt": "^3.17.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "wopr": ">=0.0.1"
+  }
+}

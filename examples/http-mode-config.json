@@ -1,0 +1,57 @@
+{
+  "_comment": "WOPR Slack Plugin Configuration - HTTP Mode (Server Deployment)",
+  "documentation": "https://github.com/TSavo/wopr-plugin-slack/blob/main/docs/CONFIGURATION.md",
+  
+  "channels": {
+    "slack": {
+      "_comment": "Enable the Slack plugin",
+      "enabled": true,
+      
+      "_comment": "Use HTTP mode for server deployments with public URL",
+      "mode": "http",
+      
+      "_comment": "Bot User OAuth Token (starts with xoxb-)",
+      "botToken": "xoxb-your-bot-token-here",
+      
+      "_comment": "Request Signing Secret for HTTP mode verification",
+      "signingSecret": "your-signing-secret-here",
+      
+      "_comment": "Webhook endpoint path (must match Slack Event Subscriptions URL)",
+      "webhookPath": "/slack/events",
+      
+      "_comment": "Custom acknowledgment reaction emoji",
+      "ackReaction": "🤖",
+      
+      "_comment": "Reply threading mode: off, first, or all",
+      "replyToMode": "off",
+      
+      "dm": {
+        "_comment": "Disable DMs for channel-only bot",
+        "enabled": false,
+        
+        "_comment": "DM policy: pairing, open, or closed",
+        "policy": "closed",
+        
+        "_comment": "No users allowed for DMs",
+        "allowFrom": []
+      },
+      
+      "_comment": "Channel policy: allowlist, open, or disabled",
+      "groupPolicy": "open",
+      
+      "_comment": "In open mode, bot responds to @mentions in any channel",
+      "channels": {
+        "#general": {
+          "allow": true,
+          "requireMention": true,
+          "enabled": true
+        },
+        "#support": {
+          "allow": true,
+          "requireMention": false,
+          "enabled": true
+        }
+      }
+    }
+  }
+}

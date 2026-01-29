@@ -1,0 +1,63 @@
+{
+  "_comment": "WOPR Slack Plugin Configuration - Socket Mode (Recommended)",
+  "documentation": "https://github.com/TSavo/wopr-plugin-slack/blob/main/docs/CONFIGURATION.md",
+  
+  "channels": {
+    "slack": {
+      "_comment": "Enable the Slack plugin",
+      "enabled": true,
+      
+      "_comment": "Use Socket Mode for firewall-friendly connections",
+      "mode": "socket",
+      
+      "_comment": "Bot User OAuth Token (starts with xoxb-)",
+      "botToken": "xoxb-your-bot-token-here",
+      
+      "_comment": "App-Level Token for Socket Mode (starts with xapp-)",
+      "appToken": "xapp-your-app-token-here",
+      
+      "_comment": "Custom acknowledgment reaction emoji",
+      "ackReaction": "👀",
+      
+      "_comment": "Reply threading mode: off, first, or all",
+      "replyToMode": "all",
+      
+      "dm": {
+        "_comment": "Enable direct message handling",
+        "enabled": true,
+        
+        "_comment": "DM policy: pairing (default), open, or closed",
+        "policy": "pairing",
+        
+        "_comment": "Allowed user IDs for DMs (empty array for pairing mode)",
+        "allowFrom": []
+      },
+      
+      "_comment": "Channel policy: allowlist (default), open, or disabled",
+      "groupPolicy": "allowlist",
+      
+      "_comment": "Per-channel configuration",
+      "channels": {
+        "#general": {
+          "_comment": "Allow bot to respond in this channel",
+          "allow": true,
+          
+          "_comment": "Require @mention to trigger response",
+          "requireMention": false,
+          
+          "_comment": "Enable this channel configuration",
+          "enabled": true
+        },
+        "#wopr-chat": {
+          "allow": true,
+          "requireMention": true,
+          "enabled": true
+        },
+        "#announcements": {
+          "allow": false,
+          "enabled": true
+        }
+      }
+    }
+  }
+}

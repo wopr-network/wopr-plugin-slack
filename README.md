@@ -1,6 +1,12 @@
 # WOPR Slack Plugin
 
-Slack integration for WOPR with Socket Mode and HTTP webhook support.
+[![npm version](https://img.shields.io/npm/v/wopr-plugin-slack.svg)](https://www.npmjs.com/package/wopr-plugin-slack)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![WOPR](https://img.shields.io/badge/WOPR-Plugin-blue)](https://github.com/TSavo/wopr)
+
+Slack integration for [WOPR](https://github.com/TSavo/wopr) with Socket Mode and HTTP webhook support.
+
+> Part of the [WOPR](https://github.com/TSavo/wopr) ecosystem - Self-sovereign AI session management over P2P.
 
 ## Features
 

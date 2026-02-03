@@ -363,18 +363,23 @@ Default policy for channel participation.
 | Type | `object` |
 | Required | No |
 
-Per-channel configuration. Keys are channel names with `#` prefix.
+Per-channel configuration. Keys should be Slack channel IDs (e.g., `C1234567890`).
+
+**Important:** The plugin matches against the Slack channel ID, not the channel name. To find a channel's ID:
+1. Right-click the channel name in Slack
+2. Select "View channel details"
+3. Scroll to the bottom to find the Channel ID (starts with `C`)
 
 ```json
 {
   "channels": {
     "slack": {
       "channels": {
-        "#general": {
+        "C1234567890": {
           "allow": true,
           "requireMention": false
         },
-        "#wopr-chat": {
+        "C0987654321": {
           "allow": true,
           "requireMention": true,
           "enabled": true
@@ -384,6 +389,8 @@ Per-channel configuration. Keys are channel names with `#` prefix.
   }
 }
 ```
+
+**Note:** Using human-readable names like `#general` in the config will not work. You must use the actual Slack channel ID.
 
 ---
 
@@ -447,15 +454,13 @@ Emoji to react with while processing a message. Can be any Slack-compatible emoj
 
 ---
 
-### `removeAckAfterReply`
+### Reaction Behavior
 
-| Property | Value |
-|----------|-------|
-| Type | `boolean` |
-| Required | No |
-| Default | `true` (implied) |
+After processing a message, the plugin automatically:
+1. Removes the acknowledgment reaction (`ackReaction`)
+2. Adds a success reaction (white_check_mark) or error reaction (x)
 
-Whether to remove the acknowledgment reaction after replying. Currently always removes and replaces with ✅ or ❌.
+This behavior is built-in and not configurable.
 
 ---
 
@@ -529,7 +534,7 @@ export SLACK_SIGNING_SECRET="YOUR-SIGNING-SECRET-HERE"
       },
       "groupPolicy": "allowlist",
       "channels": {
-        "#dev-chat": {
+        "C1234567890": {
           "allow": true,
           "requireMention": false
         }
@@ -538,6 +543,8 @@ export SLACK_SIGNING_SECRET="YOUR-SIGNING-SECRET-HERE"
   }
 }
 ```
+
+**Note:** Replace `C1234567890` with your actual Slack channel ID.
 
 ### Socket Mode - Production
 
@@ -560,11 +567,11 @@ export SLACK_SIGNING_SECRET="YOUR-SIGNING-SECRET-HERE"
       },
       "groupPolicy": "allowlist",
       "channels": {
-        "#wopr-general": {
+        "C1234567890": {
           "allow": true,
           "requireMention": false
         },
-        "#wopr-support": {
+        "C0987654321": {
           "allow": true,
           "requireMention": true
         }
@@ -573,6 +580,8 @@ export SLACK_SIGNING_SECRET="YOUR-SIGNING-SECRET-HERE"
   }
 }
 ```
+
+**Note:** Replace channel IDs with your actual Slack channel IDs.
 
 ### HTTP Mode
 
@@ -616,6 +625,20 @@ export SLACK_SIGNING_SECRET="YOUR-SIGNING-SECRET-HERE"
 
 ---
 
+## Streaming Behavior
+
+The plugin streams responses in real-time with the following built-in settings:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| Message Limit | 4000 chars | Slack's maximum message length |
+| Edit Threshold | 1500 chars | Update message after this many new characters |
+| Idle Split | 1000 ms | Start new message section after 1 second of idle |
+
+Messages exceeding 4000 characters are automatically truncated with "..." appended.
+
+---
+
 ## Configuration Validation
 
 The plugin validates configuration on startup and logs warnings for:
@@ -626,4 +649,4 @@ The plugin validates configuration on startup and logs warnings for:
 - Missing `signingSecret` in HTTP Mode
 - Invalid channel configurations
 
-Check logs at `~/.wopr/logs/slack-plugin.log` for validation details.
+Check logs at `$WOPR_HOME/logs/slack-plugin.log` for validation details. If `WOPR_HOME` is not set, logs are written to `/tmp/wopr-test/logs/`.

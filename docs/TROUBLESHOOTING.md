@@ -24,11 +24,14 @@ Common issues and solutions for the WOPR Slack Plugin.
 # Check if plugin is loaded
 wopr plugin list
 
-# View recent logs
-tail -f ~/.wopr/logs/slack-plugin.log
+# View recent logs (default location if WOPR_HOME not set)
+tail -f /tmp/wopr-test/logs/slack-plugin.log
+
+# Or if WOPR_HOME is set:
+tail -f $WOPR_HOME/logs/slack-plugin.log
 
 # Check for errors
-tail -f ~/.wopr/logs/slack-plugin-error.log
+tail -f $WOPR_HOME/logs/slack-plugin-error.log
 ```
 
 ### Verify Configuration
@@ -240,7 +243,7 @@ Error: account_inactive
        "slack": {
          "groupPolicy": "allowlist",
          "channels": {
-           "#your-channel": {
+           "C1234567890": {
              "allow": true
            }
          }
@@ -248,10 +251,10 @@ Error: account_inactive
      }
    }
    ```
-   
-   - Verify channel name matches exactly
-   - Include `#` prefix
-   - Check if `enabled: false` set
+
+   - **Use Slack channel IDs, not names** (e.g., `C1234567890`, not `#general`)
+   - Find channel ID: right-click channel -> "View channel details" -> scroll to bottom
+   - Check if `enabled: false` is set
 
 3. **Verify Bot Scopes**
    Required scopes:
@@ -287,12 +290,17 @@ Error: account_inactive
    ```json
    {
      "channels": {
-       "#general": {
-         "requireMention": true
+       "slack": {
+         "channels": {
+           "C1234567890": {
+             "requireMention": true
+           }
+         }
        }
      }
    }
    ```
+   (Use actual Slack channel ID, not channel name)
 
 2. **Check Group Policy**
    ```json
@@ -492,10 +500,12 @@ export DEBUG=slack:*
 
 ### Log Locations
 
+Log files are stored in `$WOPR_HOME/logs/`. If `WOPR_HOME` is not set, logs default to `/tmp/wopr-test/logs/`.
+
 | Log File | Contents |
 |----------|----------|
-| `~/.wopr/logs/slack-plugin.log` | General activity |
-| `~/.wopr/logs/slack-plugin-error.log` | Errors only |
+| `slack-plugin.log` | General activity (debug level) |
+| `slack-plugin-error.log` | Errors only |
 
 ---
 
@@ -505,7 +515,7 @@ export DEBUG=slack:*
 
 1. **Check logs first**
    ```bash
-   tail -n 100 ~/.wopr/logs/slack-plugin-error.log
+   tail -n 100 $WOPR_HOME/logs/slack-plugin-error.log
    ```
 
 2. **Verify configuration**

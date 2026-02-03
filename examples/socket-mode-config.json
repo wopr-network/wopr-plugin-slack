@@ -1,59 +1,58 @@
 {
   "_comment": "WOPR Slack Plugin Configuration - Socket Mode (Recommended)",
-  "documentation": "https://github.com/TSavo/wopr-plugin-slack/blob/main/docs/CONFIGURATION.md",
-  
+  "_documentation": "https://github.com/TSavo/wopr-plugin-slack/blob/main/docs/CONFIGURATION.md",
+
   "channels": {
     "slack": {
-      "_comment": "Enable the Slack plugin",
+      "_comment_1": "Enable the Slack plugin",
       "enabled": true,
-      
-      "_comment": "Use Socket Mode for firewall-friendly connections",
+
+      "_comment_2": "Use Socket Mode for firewall-friendly connections",
       "mode": "socket",
-      
-      "_comment": "Bot User OAuth Token (starts with xoxb-)",
+
+      "_comment_3": "Bot User OAuth Token (starts with xoxb-)",
       "botToken": "xoxb-your-bot-token-here",
-      
-      "_comment": "App-Level Token for Socket Mode (starts with xapp-)",
+
+      "_comment_4": "App-Level Token for Socket Mode (starts with xapp-)",
       "appToken": "xapp-your-app-token-here",
-      
-      "_comment": "Custom acknowledgment reaction emoji",
+
+      "_comment_5": "Custom acknowledgment reaction emoji",
       "ackReaction": "👀",
-      
-      "_comment": "Reply threading mode: off, first, or all",
+
+      "_comment_6": "Reply threading mode: off, first, or all",
       "replyToMode": "all",
-      
+
       "dm": {
-        "_comment": "Enable direct message handling",
+        "_comment_dm_1": "Enable direct message handling",
         "enabled": true,
-        
-        "_comment": "DM policy: pairing (default), open, or closed",
+
+        "_comment_dm_2": "DM policy: pairing (default), open, or closed",
         "policy": "pairing",
-        
-        "_comment": "Allowed user IDs for DMs (empty array for pairing mode)",
+
+        "_comment_dm_3": "Allowed user IDs for DMs (empty array for pairing mode)",
         "allowFrom": []
       },
-      
-      "_comment": "Channel policy: allowlist (default), open, or disabled",
+
+      "_comment_7": "Channel policy: allowlist (default), open, or disabled",
       "groupPolicy": "allowlist",
-      
-      "_comment": "Per-channel configuration",
+
+      "_comment_8": "Per-channel configuration - use Slack channel IDs (e.g., C1234567890)",
+      "_comment_9": "Find channel IDs by right-clicking channel -> View channel details -> scroll to bottom",
       "channels": {
-        "#general": {
-          "_comment": "Allow bot to respond in this channel",
+        "C1234567890": {
+          "_comment_ch": "Replace with your actual channel ID",
           "allow": true,
-          
-          "_comment": "Require @mention to trigger response",
           "requireMention": false,
-          
-          "_comment": "Enable this channel configuration",
           "enabled": true
         },
-        "#wopr-chat": {
+        "C0987654321": {
+          "_comment_ch": "Example: mention-required channel",
           "allow": true,
           "requireMention": true,
           "enabled": true
         },
-        "#announcements": {
+        "C1122334455": {
+          "_comment_ch": "Example: disabled channel",
           "allow": false,
           "enabled": true
         }

@@ -86,16 +86,19 @@ That's it! Start WOPR and your bot will connect to Slack.
 1. Go to **OAuth & Permissions** in the left sidebar
 2. Scroll to **Scopes** → **Bot Token Scopes**
 3. Add the following scopes:
-   - `app_mentions:read` - Read mention events
-   - `channels:history` - Read channel messages
-   - `channels:join` - Join channels automatically
-   - `chat:write` - Send messages
-   - `groups:history` - Read private channel messages
-   - `im:history` - Read DM history
-   - `im:write` - Send DMs
-   - `mpim:history` - Read group DM history
-   - `reactions:write` - Add reactions
-   - `users:read` - Read user info
+
+| Scope | Purpose | Required |
+|-------|---------|----------|
+| `app_mentions:read` | Detect @mentions | Yes |
+| `channels:history` | Read public channel messages | Yes |
+| `chat:write` | Send messages | Yes |
+| `im:history` | Read DM history | Yes |
+| `im:write` | Send DMs | Yes |
+| `reactions:write` | Add emoji reactions | Yes |
+| `channels:join` | Auto-join public channels | Recommended |
+| `groups:history` | Read private channel messages | Recommended |
+| `mpim:history` | Read group DM history | Recommended |
+| `users:read` | Get user info for logging | Recommended |
 
 ### 4. Install to Workspace
 
@@ -124,6 +127,8 @@ Add the tokens to your WOPR configuration:
 
 ## ⚙️ Configuration Options
 
+### Core Options
+
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | `enabled` | boolean | No | `true` | Enable/disable the plugin |
@@ -131,12 +136,18 @@ Add the tokens to your WOPR configuration:
 | `botToken` | string | **Yes** | - | Bot User OAuth Token (`xoxb-...`) |
 | `appToken` | string | For socket | - | App-Level Token (`xapp-...`) |
 | `signingSecret` | string | For HTTP | - | Signing secret for HTTP mode |
-| `webhookPath` | string | No | `/slack/events` | Webhook endpoint path |
+| `webhookPath` | string | No | `"/slack/events"` | Webhook endpoint path (HTTP mode) |
 | `ackReaction` | string | No | `"👀"` | Reaction emoji while processing |
 | `replyToMode` | string | No | `"off"` | Threading: `"off"`, `"first"`, `"all"` |
-| `dm.policy` | string | No | `"pairing"` | DM policy: `"pairing"`, `"open"`, `"closed"` |
-| `dm.allowFrom` | array | No | `[]` | Allowed user IDs for DMs |
 | `groupPolicy` | string | No | `"allowlist"` | Channel policy: `"allowlist"`, `"open"`, `"disabled"` |
+
+### DM Options (nested under `dm`)
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `dm.enabled` | boolean | No | `true` | Enable/disable DM handling |
+| `dm.policy` | string | No | `"pairing"` | DM policy: `"pairing"`, `"open"`, `"closed"` |
+| `dm.allowFrom` | array | No | `[]` | Allowed user IDs for DMs (use `["*"]` for all) |
 
 ### Full Configuration Example
 
@@ -157,11 +168,11 @@ Add the tokens to your WOPR configuration:
       },
       "groupPolicy": "allowlist",
       "channels": {
-        "#general": {
+        "C1234567890": {
           "allow": true,
           "requireMention": false
         },
-        "#wopr-chat": {
+        "C0987654321": {
           "allow": true,
           "requireMention": true
         }
@@ -170,6 +181,8 @@ Add the tokens to your WOPR configuration:
   }
 }
 ```
+
+**Note:** Channel keys must be Slack channel IDs (e.g., `C1234567890`), not channel names. Find a channel's ID by viewing its details in Slack.
 
 ---
 
@@ -205,18 +218,20 @@ Add the tokens to your WOPR configuration:
 You can configure the plugin using environment variables:
 
 ```bash
-# Required tokens
+# Required tokens (used as fallback if not in config file)
 export SLACK_BOT_TOKEN="xoxb-your-bot-token"
 export SLACK_APP_TOKEN="xapp-your-app-token"
 
 # Optional: HTTP mode
 export SLACK_SIGNING_SECRET="your-signing-secret"
 
-# Optional: WOPR home directory for logs
+# Optional: WOPR home directory (used for log file location)
 export WOPR_HOME="/home/user/.wopr"
 ```
 
-Environment variables override config file values.
+Environment variables are used as fallbacks when tokens are not specified in the config file.
+
+**Note:** Log files are written to `$WOPR_HOME/logs/slack-plugin.log` and `$WOPR_HOME/logs/slack-plugin-error.log`. If `WOPR_HOME` is not set, logs default to `/tmp/wopr-test/logs/`.
 
 ---
 
@@ -249,13 +264,15 @@ Require `@mention` for responses:
 ```json
 {
   "channels": {
-    "#general": {
+    "C1234567890": {
       "allow": true,
       "requireMention": true
     }
   }
 }
 ```
+
+**Note:** Use the Slack channel ID, not the channel name.
 
 ---
 

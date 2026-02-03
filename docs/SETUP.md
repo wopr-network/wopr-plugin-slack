@@ -107,16 +107,18 @@ Socket Mode is the recommended way to connect your bot.
 3. Under **Subscribe to bot events**, click **Add Bot User Event**
 
 4. Add these events:
-   
-   | Event | Description |
-   |-------|-------------|
-   | `app_mention` | When bot is @mentioned |
-   | `message.channels` | Messages in public channels |
-   | `message.groups` | Messages in private channels |
-   | `message.im` | Direct messages |
-   | `message.mpim` | Group direct messages |
+
+   | Event | Description | Required |
+   |-------|-------------|----------|
+   | `app_mention` | When bot is @mentioned | Yes |
+   | `message.im` | Direct messages | Yes |
+   | `message.channels` | Messages in public channels | Recommended |
+   | `message.groups` | Messages in private channels | Recommended |
+   | `message.mpim` | Group direct messages | Optional |
 
 5. Click **Save Changes**
+
+**Note:** Socket Mode does not require a Request URL. For HTTP mode, you'll need to provide a publicly accessible URL.
 
 ---
 
@@ -209,7 +211,7 @@ nano ~/.wopr/config.json
 
 ### 5.2 Add Slack Configuration
 
-Add this to your config (replace tokens with yours):
+Add this to your config (replace tokens and channel IDs with yours):
 
 ```json
 {
@@ -225,7 +227,7 @@ Add this to your config (replace tokens with yours):
       },
       "groupPolicy": "allowlist",
       "channels": {
-        "#general": {
+        "C1234567890": {
           "allow": true,
           "requireMention": false
         }
@@ -234,6 +236,8 @@ Add this to your config (replace tokens with yours):
   }
 }
 ```
+
+**Finding Channel IDs:** Right-click any channel in Slack, select "View channel details", and scroll to the bottom to find the Channel ID (starts with `C`).
 
 ### 5.3 Or Use Environment Variables
 
@@ -257,7 +261,11 @@ wopr restart
 Check logs:
 
 ```bash
-tail -f ~/.wopr/logs/slack-plugin.log
+# If WOPR_HOME is set:
+tail -f $WOPR_HOME/logs/slack-plugin.log
+
+# Or default location:
+tail -f /tmp/wopr-test/logs/slack-plugin.log
 ```
 
 You should see:
@@ -337,17 +345,23 @@ See [CONFIGURATION.md](./CONFIGURATION.md) for:
 
 ### Add More Channels
 
-Edit `~/.wopr/config.json`:
+Edit `~/.wopr/config.json` and add channel IDs:
 
 ```json
 {
   "channels": {
-    "#general": { "allow": true },
-    "#wopr-chat": { "allow": true, "requireMention": true },
-    "#private-wopr": { "allow": true }
+    "slack": {
+      "channels": {
+        "C1234567890": { "allow": true },
+        "C0987654321": { "allow": true, "requireMention": true },
+        "C1122334455": { "allow": true }
+      }
+    }
   }
 }
 ```
+
+**Finding Channel IDs:** Right-click the channel in Slack -> "View channel details" -> scroll to bottom.
 
 Remember to invite the bot to each channel!
 
@@ -402,13 +416,15 @@ See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for more help.
       },
       "groupPolicy": "allowlist",
       "channels": {
-        "#wopr-general": { "allow": true },
-        "#wopr-support": { "allow": true, "requireMention": true }
+        "C1234567890": { "allow": true },
+        "C0987654321": { "allow": true, "requireMention": true }
       }
     }
   }
 }
 ```
+
+**Note:** Replace `C1234567890` etc. with actual Slack channel IDs from your workspace.
 
 ---
 

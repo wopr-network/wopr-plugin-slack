@@ -1,52 +1,56 @@
 {
   "_comment": "WOPR Slack Plugin Configuration - HTTP Mode (Server Deployment)",
-  "documentation": "https://github.com/TSavo/wopr-plugin-slack/blob/main/docs/CONFIGURATION.md",
-  
+  "_documentation": "https://github.com/TSavo/wopr-plugin-slack/blob/main/docs/CONFIGURATION.md",
+
   "channels": {
     "slack": {
-      "_comment": "Enable the Slack plugin",
+      "_comment_1": "Enable the Slack plugin",
       "enabled": true,
-      
-      "_comment": "Use HTTP mode for server deployments with public URL",
+
+      "_comment_2": "Use HTTP mode for server deployments with public URL",
       "mode": "http",
-      
-      "_comment": "Bot User OAuth Token (starts with xoxb-)",
+
+      "_comment_3": "Bot User OAuth Token (starts with xoxb-)",
       "botToken": "xoxb-your-bot-token-here",
-      
-      "_comment": "Request Signing Secret for HTTP mode verification",
+
+      "_comment_4": "Request Signing Secret for HTTP mode verification",
       "signingSecret": "your-signing-secret-here",
-      
-      "_comment": "Webhook endpoint path (must match Slack Event Subscriptions URL)",
+
+      "_comment_5": "Webhook endpoint path (must match Slack Event Subscriptions URL)",
       "webhookPath": "/slack/events",
-      
-      "_comment": "Custom acknowledgment reaction emoji",
+
+      "_comment_6": "Custom acknowledgment reaction emoji",
       "ackReaction": "🤖",
-      
-      "_comment": "Reply threading mode: off, first, or all",
+
+      "_comment_7": "Reply threading mode: off, first, or all",
       "replyToMode": "off",
-      
+
       "dm": {
-        "_comment": "Disable DMs for channel-only bot",
+        "_comment_dm_1": "Disable DMs for channel-only bot",
         "enabled": false,
-        
-        "_comment": "DM policy: pairing, open, or closed",
+
+        "_comment_dm_2": "DM policy: pairing, open, or closed",
         "policy": "closed",
-        
-        "_comment": "No users allowed for DMs",
+
+        "_comment_dm_3": "No users allowed for DMs",
         "allowFrom": []
       },
-      
-      "_comment": "Channel policy: allowlist, open, or disabled",
+
+      "_comment_8": "Channel policy: allowlist, open, or disabled",
       "groupPolicy": "open",
-      
-      "_comment": "In open mode, bot responds to @mentions in any channel",
+
+      "_comment_9": "In open mode with groupPolicy=open, bot responds to @mentions in any channel",
+      "_comment_10": "Channel-specific configs below use Slack channel IDs",
+      "_comment_11": "Find channel IDs: right-click channel -> View channel details -> scroll to bottom",
       "channels": {
-        "#general": {
+        "C1234567890": {
+          "_comment_ch": "Replace with your actual channel ID",
           "allow": true,
           "requireMention": true,
           "enabled": true
         },
-        "#support": {
+        "C0987654321": {
+          "_comment_ch": "Example: no mention required",
           "allow": true,
           "requireMention": false,
           "enabled": true

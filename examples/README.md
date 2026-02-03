@@ -22,7 +22,10 @@ Example configuration files for the WOPR Slack Plugin.
    cp socket-mode-config.json ~/.wopr/config.json
    ```
 
-2. Edit and add your tokens:
+2. Edit and update:
+   - Replace tokens with your actual tokens
+   - Replace channel IDs (`C1234567890`, etc.) with your actual Slack channel IDs
+
    ```json
    {
      "botToken": "xoxb-your-actual-token",
@@ -34,6 +37,8 @@ Example configuration files for the WOPR Slack Plugin.
    ```bash
    wopr restart
    ```
+
+**Finding Channel IDs:** Right-click a channel in Slack -> "View channel details" -> scroll to the bottom.
 
 ### HTTP Mode
 
@@ -154,6 +159,10 @@ Then use minimal config:
 
 ### Multi-Channel with Different Policies
 
+**Important:** Channel keys must be Slack channel IDs (e.g., `C1234567890`), not channel names like `#general`.
+
+To find a channel's ID: Right-click the channel in Slack -> "View channel details" -> scroll to the bottom.
+
 ```json
 {
   "channels": {
@@ -169,15 +178,15 @@ Then use minimal config:
       },
       "groupPolicy": "allowlist",
       "channels": {
-        "#general": {
+        "C1234567890": {
           "allow": true,
           "requireMention": true
         },
-        "#wopr-support": {
+        "C0987654321": {
           "allow": true,
           "requireMention": false
         },
-        "#wopr-private": {
+        "C1122334455": {
           "allow": true,
           "requireMention": false
         }

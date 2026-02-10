@@ -1,14 +1,15 @@
 {
-  "name": "wopr-plugin-slack",
-  "version": "1.0.0",
+  "author": "TSavo",
+  "dependencies": {
+    "@slack/bolt": "^3.17.0",
+    "winston": "^3.11.0"
+  },
   "description": "Slack integration for WOPR - Socket Mode and HTTP webhook support",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsx src/index.ts",
-    "watch": "tsc --watch"
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
   },
   "keywords": [
     "wopr",
@@ -17,18 +18,22 @@
     "bot",
     "chat"
   ],
-  "author": "TSavo",
   "license": "MIT",
-  "dependencies": {
-    "@slack/bolt": "^3.17.0",
-    "winston": "^3.11.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
-  },
+  "main": "dist/index.js",
+  "name": "wopr-plugin-slack",
   "peerDependencies": {
     "wopr": ">=0.0.1"
-  }
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "biome check src/ && tsc --noEmit",
+    "dev": "tsx src/index.ts",
+    "format": "biome format --write src/",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --fix src/",
+    "watch": "tsc --watch"
+  },
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "version": "1.0.0"
 }

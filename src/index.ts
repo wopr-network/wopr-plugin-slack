@@ -5,26 +5,26 @@
  * Uses @slack/bolt for robust event handling.
  */
 
-import { App, LogLevel } from "@slack/bolt";
-import winston from "winston";
 import path from "node:path";
-import type {
-	WOPRPlugin,
-	WOPRPluginContext,
-	ConfigSchema,
-	StreamMessage,
-	SlackConfig,
-	AgentIdentity,
-} from "./types.js";
+import { App, FileInstallationStore, LogLevel } from "@slack/bolt";
+import winston from "winston";
 import {
-	createPairingRequest,
-	checkRequestRateLimit,
-	buildPairingMessage,
-	isUserAllowed,
 	approveUser,
+	buildPairingMessage,
+	checkRequestRateLimit,
 	claimPairingCode,
 	cleanupExpiredPairings,
+	createPairingRequest,
+	isUserAllowed,
 } from "./pairing.js";
+import type {
+	AgentIdentity,
+	ConfigSchema,
+	SlackConfig,
+	StreamMessage,
+	WOPRPlugin,
+	WOPRPluginContext,
+} from "./types.js";
 
 const logger = winston.createLogger({
 	level: "debug",
@@ -117,6 +117,29 @@ const configSchema: ConfigSchema = {
 			label: "Signing Secret",
 			placeholder: "...",
 			description: "Required for HTTP mode (from Slack App Basic Info)",
+		},
+		{
+			name: "clientId",
+			type: "password",
+			label: "Client ID",
+			placeholder: "...",
+			description:
+				"OAuth Client ID for automatic token rotation (granular permissions)",
+		},
+		{
+			name: "clientSecret",
+			type: "password",
+			label: "Client Secret",
+			placeholder: "...",
+			description:
+				"OAuth Client Secret for automatic token rotation (granular permissions)",
+		},
+		{
+			name: "stateSecret",
+			type: "password",
+			label: "State Secret",
+			placeholder: "...",
+			description: "Secret for OAuth state verification (any random string)",
 		},
 		{
 			name: "ackReaction",
@@ -245,7 +268,11 @@ async function shouldRespond(
 				try {
 					await approveUser(ctx, request.slackUserId);
 				} catch (e) {
-					logger.error({ msg: "Failed to approve user after pairing claim", user: message.user, error: String(e) });
+					logger.error({
+						msg: "Failed to approve user after pairing claim",
+						user: message.user,
+						error: String(e),
+					});
 				}
 				logger.info({ msg: "Pairing claimed via DM", user: message.user });
 				// Send confirmation — we'll respond via the say callback if available
@@ -572,10 +599,35 @@ async function finalizeMessage(
 }
 
 /**
+ * Build OAuth / token rotation options when credentials are provided.
+ * Bolt 4 uses these to auto-refresh granular bot tokens (90-day expiry).
+ */
+function buildOAuthOptions(config: SlackConfig) {
+	if (!config.clientId || !config.clientSecret) return {};
+
+	const installDir = path.join(
+		process.env.WOPR_HOME || "/tmp/wopr-test",
+		"data",
+		"slack-installations",
+	);
+
+	return {
+		clientId: config.clientId,
+		clientSecret: config.clientSecret,
+		stateSecret: config.stateSecret || "wopr-slack-state",
+		installationStore: new FileInstallationStore({
+			baseDir: installDir,
+		}),
+		tokenVerificationEnabled: true,
+	};
+}
+
+/**
  * Initialize the Slack app
  */
 async function initSlackApp(config: SlackConfig): Promise<App> {
 	const mode = config.mode || "socket";
+	const oauthOpts = buildOAuthOptions(config);
 
 	if (mode === "socket") {
 		if (!config.appToken) {
@@ -589,6 +641,7 @@ async function initSlackApp(config: SlackConfig): Promise<App> {
 			appToken: config.appToken,
 			socketMode: true,
 			logLevel: LogLevel.INFO,
+			...oauthOpts,
 		});
 	} else {
 		// HTTP mode
@@ -603,6 +656,7 @@ async function initSlackApp(config: SlackConfig): Promise<App> {
 			signingSecret: config.signingSecret,
 			endpoints: config.webhookPath || "/slack/events",
 			logLevel: LogLevel.INFO,
+			...oauthOpts,
 		});
 	}
 }
@@ -620,7 +674,7 @@ const plugin: WOPRPlugin = {
 		await refreshIdentity();
 
 		// Get config - config is stored directly on the plugin, not nested under channels
-		let fullConfig = ctx.getConfig<{ channels?: { slack?: SlackConfig } }>();
+		const fullConfig = ctx.getConfig<{ channels?: { slack?: SlackConfig } }>();
 		let config: SlackConfig = fullConfig?.channels?.slack || {};
 
 		// Check env vars as fallback
@@ -635,6 +689,15 @@ const plugin: WOPRPlugin = {
 				...config,
 				appToken: process.env.SLACK_APP_TOKEN,
 			};
+		}
+		if (!config.clientId && process.env.SLACK_CLIENT_ID) {
+			config = { ...config, clientId: process.env.SLACK_CLIENT_ID };
+		}
+		if (!config.clientSecret && process.env.SLACK_CLIENT_SECRET) {
+			config = { ...config, clientSecret: process.env.SLACK_CLIENT_SECRET };
+		}
+		if (!config.stateSecret && process.env.SLACK_STATE_SECRET) {
+			config = { ...config, stateSecret: process.env.SLACK_STATE_SECRET };
 		}
 
 		if (!config.enabled) {

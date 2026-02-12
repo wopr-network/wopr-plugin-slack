@@ -5,6 +5,7 @@
  * Uses @slack/bolt for robust event handling.
  */
 
+import crypto from "node:crypto";
 import path from "node:path";
 import { App, FileInstallationStore, LogLevel } from "@slack/bolt";
 import winston from "winston";
@@ -611,10 +612,18 @@ function buildOAuthOptions(config: SlackConfig) {
 		"slack-installations",
 	);
 
+	let stateSecret = config.stateSecret;
+	if (!stateSecret) {
+		stateSecret = crypto.randomBytes(32).toString("hex");
+		logger.warn(
+			"No stateSecret configured for OAuth. Generated a random one — it will not persist across restarts. Set SLACK_STATE_SECRET or config.channels.slack.stateSecret for stable CSRF protection.",
+		);
+	}
+
 	return {
 		clientId: config.clientId,
 		clientSecret: config.clientSecret,
-		stateSecret: config.stateSecret || "wopr-slack-state",
+		stateSecret,
 		installationStore: new FileInstallationStore({
 			baseDir: installDir,
 		}),
@@ -628,6 +637,7 @@ function buildOAuthOptions(config: SlackConfig) {
 async function initSlackApp(config: SlackConfig): Promise<App> {
 	const mode = config.mode || "socket";
 	const oauthOpts = buildOAuthOptions(config);
+	const hasOAuth = "installationStore" in oauthOpts;
 
 	if (mode === "socket") {
 		if (!config.appToken) {
@@ -637,7 +647,7 @@ async function initSlackApp(config: SlackConfig): Promise<App> {
 		}
 
 		return new App({
-			token: config.botToken,
+			...(hasOAuth ? {} : { token: config.botToken }),
 			appToken: config.appToken,
 			socketMode: true,
 			logLevel: LogLevel.INFO,
@@ -652,7 +662,7 @@ async function initSlackApp(config: SlackConfig): Promise<App> {
 		}
 
 		return new App({
-			token: config.botToken,
+			...(hasOAuth ? {} : { token: config.botToken }),
 			signingSecret: config.signingSecret,
 			endpoints: config.webhookPath || "/slack/events",
 			logLevel: LogLevel.INFO,

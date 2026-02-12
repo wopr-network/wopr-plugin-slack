@@ -7,6 +7,7 @@
  */
 
 import type { App } from "@slack/bolt";
+import { isUserAllowed } from "./pairing.js";
 import type { StreamMessage, WOPRPluginContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -148,17 +149,37 @@ export function registerSlashCommands(
 	boltApp: App,
 	getCtx: () => WOPRPluginContext | null,
 ): void {
-	// /status — show session status
-	boltApp.command("/status", async ({ command, ack, respond }) => {
-		await ack();
+	/** Require ctx + authorized user. Returns ctx on success, null on deny. */
+	async function requireAuth(
+		command: { user_id: string },
+		respond: (msg: {
+			response_type: "ephemeral" | "in_channel";
+			text: string;
+		}) => Promise<unknown>,
+	): Promise<WOPRPluginContext | null> {
 		const ctx = getCtx();
 		if (!ctx) {
 			await respond({
 				response_type: "ephemeral",
 				text: "WOPR is not ready yet.",
 			});
-			return;
+			return null;
 		}
+		if (!isUserAllowed(ctx, command.user_id)) {
+			await respond({
+				response_type: "ephemeral",
+				text: "You are not authorized to use WOPR commands. Please pair your account first via DM.",
+			});
+			return null;
+		}
+		return ctx;
+	}
+
+	// /status — show session status
+	boltApp.command("/status", async ({ command, ack, respond }) => {
+		await ack();
+		const ctx = await requireAuth(command, respond);
+		if (!ctx) return;
 		const sessionKey = sessionKeyFromCommand(
 			command.channel_id,
 			command.user_id,
@@ -180,6 +201,7 @@ export function registerSlashCommands(
 	// /new — reset session
 	boltApp.command("/new", async ({ command, ack, respond }) => {
 		await ack();
+		if (!(await requireAuth(command, respond))) return;
 		const sessionKey = sessionKeyFromCommand(
 			command.channel_id,
 			command.user_id,
@@ -194,14 +216,8 @@ export function registerSlashCommands(
 	// /compact — compact session context
 	boltApp.command("/compact", async ({ command, ack, respond }) => {
 		await ack();
-		const ctx = getCtx();
-		if (!ctx) {
-			await respond({
-				response_type: "ephemeral",
-				text: "WOPR is not ready yet.",
-			});
-			return;
-		}
+		const ctx = await requireAuth(command, respond);
+		if (!ctx) return;
 		const sessionKey = sessionKeyFromCommand(
 			command.channel_id,
 			command.user_id,
@@ -252,6 +268,7 @@ export function registerSlashCommands(
 	// /think — set thinking level
 	boltApp.command("/think", async ({ command, ack, respond }) => {
 		await ack();
+		if (!(await requireAuth(command, respond))) return;
 		const level = command.text.trim().toLowerCase();
 		const validLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
 		if (!level) {
@@ -288,6 +305,7 @@ export function registerSlashCommands(
 	// /verbose — toggle verbose mode
 	boltApp.command("/verbose", async ({ command, ack, respond }) => {
 		await ack();
+		if (!(await requireAuth(command, respond))) return;
 		const input = command.text.trim().toLowerCase();
 		const sessionKey = sessionKeyFromCommand(
 			command.channel_id,
@@ -315,6 +333,7 @@ export function registerSlashCommands(
 	// /usage — set usage tracking mode
 	boltApp.command("/usage", async ({ command, ack, respond }) => {
 		await ack();
+		if (!(await requireAuth(command, respond))) return;
 		const mode = command.text.trim().toLowerCase();
 		const validModes = ["off", "tokens", "full"];
 		if (!mode) {
@@ -351,14 +370,8 @@ export function registerSlashCommands(
 	// /model — switch AI model
 	boltApp.command("/model", async ({ command, ack, respond }) => {
 		await ack();
-		const ctx = getCtx();
-		if (!ctx) {
-			await respond({
-				response_type: "ephemeral",
-				text: "WOPR is not ready yet.",
-			});
-			return;
-		}
+		const ctx = await requireAuth(command, respond);
+		if (!ctx) return;
 
 		const modelChoice = command.text.trim();
 		if (!modelChoice) {
@@ -420,6 +433,7 @@ export function registerSlashCommands(
 	// /session — switch to a named session
 	boltApp.command("/session", async ({ command, ack, respond }) => {
 		await ack();
+		if (!(await requireAuth(command, respond))) return;
 		const name = command.text.trim();
 		if (!name) {
 			await respond({
@@ -451,14 +465,8 @@ export function registerSlashCommands(
 	// /cancel — cancel the current AI response
 	boltApp.command("/cancel", async ({ command, ack, respond }) => {
 		await ack();
-		const ctx = getCtx();
-		if (!ctx) {
-			await respond({
-				response_type: "ephemeral",
-				text: "WOPR is not ready yet.",
-			});
-			return;
-		}
+		const ctx = await requireAuth(command, respond);
+		if (!ctx) return;
 
 		const sessionKey = sessionKeyFromCommand(
 			command.channel_id,

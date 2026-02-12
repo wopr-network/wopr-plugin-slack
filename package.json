@@ -2,6 +2,7 @@
   "author": "TSavo",
   "dependencies": {
     "@slack/bolt": "^4.6.0",
+    "@wopr-network/plugin-types": "github:wopr-network/wopr-plugin-types",
     "winston": "^3.11.0"
   },
   "description": "Slack integration for WOPR - Socket Mode and HTTP webhook support",

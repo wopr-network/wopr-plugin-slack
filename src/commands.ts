@@ -8,7 +8,7 @@
 
 import type { App } from "@slack/bolt";
 import { isUserAllowed } from "./pairing.js";
-import type { StreamMessage, WOPRPluginContext } from "./types.js";
+import type { ProviderInfo, StreamMessage, WOPRPluginContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Session state (mirrors Discord plugin's per-session config)
@@ -78,7 +78,7 @@ function getAllModels(ctx: WOPRPluginContext): ResolvedModel[] {
 	const results: ResolvedModel[] = [];
 	const providerIds = ["anthropic", "openai", "kimi", "opencode", "codex"];
 	for (const pid of providerIds) {
-		const provider = ctx.getProvider?.(pid);
+		const provider = ctx.getProvider?.(pid) as ProviderInfo | undefined;
 		if (!provider?.supportedModels) continue;
 		for (const modelId of provider.supportedModels) {
 			results.push({
@@ -407,9 +407,15 @@ export function registerSlashCommands(
 		);
 		const state = getSessionState(sessionKey);
 
-		if (ctx.setSessionProvider) {
+		const ctxRecord = ctx as unknown as Record<string, unknown>;
+		const maybeSetProvider = ctxRecord["setSessionProvider"];
+		const setProvider =
+			typeof maybeSetProvider === "function"
+				? (maybeSetProvider as (session: string, provider: string, options?: { model?: string }) => Promise<void>)
+				: undefined;
+		if (setProvider) {
 			try {
-				await ctx.setSessionProvider(sessionKey, resolved.provider, {
+				await setProvider(sessionKey, resolved.provider, {
 					model: resolved.id,
 				});
 				state.model = resolved.id;

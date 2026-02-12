@@ -1,122 +1,39 @@
 /**
  * Type definitions for WOPR Slack Plugin
+ *
+ * Shared types are re-exported from @wopr-network/plugin-types.
+ * Plugin-specific types are defined locally below.
  */
 
-export interface ConfigField {
-	name: string;
-	type: string;
-	label?: string;
-	placeholder?: string;
-	required?: boolean;
-	description?: string;
-	hidden?: boolean;
-	default?: any;
-	options?: Array<{ value: string; label: string }>;
-}
+// Re-export shared types used by this plugin
+export type {
+	AgentIdentity,
+	ConfigField,
+	ConfigSchema,
+	PluginLogger,
+	StreamMessage,
+	UserProfile,
+	WOPRPlugin,
+	WOPRPluginContext,
+} from "@wopr-network/plugin-types";
 
-export interface ConfigSchema {
-	title: string;
-	description: string;
-	fields: ConfigField[];
-}
+// Re-export renamed types with local aliases for backward compatibility
+export type { ChannelRef as ChannelInfo } from "@wopr-network/plugin-types";
+export type { PluginInjectOptions as InjectOptions } from "@wopr-network/plugin-types";
 
-export interface StreamMessage {
-	type: "text" | "assistant" | "system";
-	content: string;
-	subtype?: string;
-	metadata?: Record<string, unknown>;
-}
-
-export interface ChannelInfo {
-	type: string;
-	id: string;
-	name?: string;
-}
-
-export interface InjectOptions {
-	silent?: boolean;
-	onStream?: (msg: StreamMessage) => void;
-	from?: string;
-	channel?: ChannelInfo;
-	images?: string[];
-}
+// ---------------------------------------------------------------------------
+// Plugin-specific types (not in the shared package)
+// ---------------------------------------------------------------------------
 
 export interface LogMessageOptions {
 	from?: string;
-	channel?: ChannelInfo;
-}
-
-export interface PluginLogger {
-	info: (...args: any[]) => void;
-	warn: (...args: any[]) => void;
-	error: (...args: any[]) => void;
-}
-
-export interface AgentIdentity {
-	name?: string;
-	creature?: string;
-	vibe?: string;
-	emoji?: string;
-}
-
-export interface UserProfile {
-	name?: string;
-	preferredAddress?: string;
-	pronouns?: string;
-	timezone?: string;
-	notes?: string;
+	channel?: { type: string; id: string; name?: string };
 }
 
 export interface ProviderInfo {
 	id: string;
 	name: string;
 	supportedModels?: string[];
-}
-
-export interface WOPRPluginContext {
-	inject: (
-		session: string,
-		message: string,
-		options?: InjectOptions,
-	) => Promise<string>;
-	logMessage: (
-		session: string,
-		message: string,
-		options?: LogMessageOptions,
-	) => void;
-	injectPeer: (
-		peer: string,
-		session: string,
-		message: string,
-	) => Promise<string>;
-	getIdentity: () => { publicKey: string; shortId: string; encryptPub: string };
-	getAgentIdentity: () => AgentIdentity | Promise<AgentIdentity>;
-	getUserProfile: () => UserProfile | Promise<UserProfile>;
-	getSessions: () => string[];
-	getPeers: () => any[];
-	getConfig: <T = any>() => T;
-	saveConfig: <T>(config: T) => Promise<void>;
-	getMainConfig: (key?: string) => any;
-	registerConfigSchema: (pluginId: string, schema: ConfigSchema) => void;
-	getPluginDir: () => string;
-	log: PluginLogger;
-	// Provider/model management (optional — available when core supports it)
-	getProvider?: (id: string) => ProviderInfo | undefined;
-	setSessionProvider?: (
-		session: string,
-		provider: string,
-		options?: { model?: string },
-	) => Promise<void>;
-	// Cancel an in-progress injection for a session
-	cancelInject?: (session: string) => boolean;
-}
-
-export interface WOPRPlugin {
-	name: string;
-	version: string;
-	description: string;
-	init?: (context: WOPRPluginContext) => Promise<void>;
-	shutdown?: () => Promise<void>;
 }
 
 // Retry configuration

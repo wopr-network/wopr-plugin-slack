@@ -493,7 +493,7 @@ async function handleMessage(
 			let textContent = "";
 			if (msg.type === "text" && msg.content) {
 				textContent = msg.content;
-			} else if (msg.type === "assistant" && (msg as any).message?.content) {
+			} else if ((msg.type as string) === "assistant" && (msg as any).message?.content) {
 				const content = (msg as any).message.content;
 				if (Array.isArray(content)) {
 					textContent = content.map((c: any) => c.text || "").join("");

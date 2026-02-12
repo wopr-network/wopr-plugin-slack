@@ -407,9 +407,12 @@ export function registerSlashCommands(
 		);
 		const state = getSessionState(sessionKey);
 
-		const setProvider = (ctx as unknown as Record<string, unknown>).setSessionProvider as
-			| ((session: string, provider: string, options?: { model?: string }) => Promise<void>)
-			| undefined;
+		const ctxRecord = ctx as unknown as Record<string, unknown>;
+		const maybeSetProvider = ctxRecord["setSessionProvider"];
+		const setProvider =
+			typeof maybeSetProvider === "function"
+				? (maybeSetProvider as (session: string, provider: string, options?: { model?: string }) => Promise<void>)
+				: undefined;
 		if (setProvider) {
 			try {
 				await setProvider(sessionKey, resolved.provider, {

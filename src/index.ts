@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { App, FileInstallationStore, LogLevel } from "@slack/bolt";
 import winston from "winston";
+import { incrementMessageCount, registerSlashCommands } from "./commands.js";
 import {
 	approveUser,
 	buildPairingMessage,
@@ -461,6 +462,7 @@ async function handleMessage(
 	}
 
 	const sessionKey = buildSessionKey(context.channel, message.user, isDM);
+	incrementMessageCount(sessionKey);
 
 	// Determine reply threading
 	const replyToMode = config.replyToMode || "off";
@@ -835,6 +837,9 @@ const plugin: WOPRPlugin = {
 					config,
 				);
 			});
+
+			// Register slash commands
+			registerSlashCommands(app, () => ctx);
 
 			// Start periodic cleanup of expired pairing codes
 			cleanupTimer = setInterval(() => cleanupExpiredPairings(), 5 * 60 * 1000);

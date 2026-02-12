@@ -21,8 +21,10 @@ export interface ConfigSchema {
 }
 
 export interface StreamMessage {
-	type: "text" | "assistant";
+	type: "text" | "assistant" | "system";
 	content: string;
+	subtype?: string;
+	metadata?: Record<string, unknown>;
 }
 
 export interface ChannelInfo {
@@ -65,6 +67,12 @@ export interface UserProfile {
 	notes?: string;
 }
 
+export interface ProviderInfo {
+	id: string;
+	name: string;
+	supportedModels?: string[];
+}
+
 export interface WOPRPluginContext {
 	inject: (
 		session: string,
@@ -92,6 +100,15 @@ export interface WOPRPluginContext {
 	registerConfigSchema: (pluginId: string, schema: ConfigSchema) => void;
 	getPluginDir: () => string;
 	log: PluginLogger;
+	// Provider/model management (optional — available when core supports it)
+	getProvider?: (id: string) => ProviderInfo | undefined;
+	setSessionProvider?: (
+		session: string,
+		provider: string,
+		options?: { model?: string },
+	) => Promise<void>;
+	// Cancel an in-progress injection for a session
+	cancelInject?: (session: string) => boolean;
 }
 
 export interface WOPRPlugin {

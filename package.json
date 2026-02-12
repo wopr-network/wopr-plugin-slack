@@ -22,7 +22,7 @@
   ],
   "license": "MIT",
   "main": "dist/index.js",
-  "name": "wopr-plugin-slack",
+  "name": "@wopr-network/wopr-plugin-slack",
   "scripts": {
     "build": "tsc",
     "check": "biome check src/ && tsc --noEmit",
@@ -31,9 +31,16 @@
     "lint": "biome check src/",
     "lint:fix": "biome check --fix src/",
     "test": "vitest run",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run build"
   },
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ]
 }

@@ -5,6 +5,7 @@ const mockStart = vi.fn();
 const mockStop = vi.fn();
 const mockMessage = vi.fn();
 const mockEvent = vi.fn();
+const mockCommand = vi.fn();
 const mockAuthTest = vi.fn().mockResolvedValue({ user_id: "UBOT123" });
 const mockReactionsAdd = vi.fn();
 const mockReactionsRemove = vi.fn();
@@ -21,6 +22,7 @@ vi.mock("@slack/bolt", () => {
 		stop = mockStop;
 		message = mockMessage;
 		event = mockEvent;
+		command = mockCommand;
 		client = {
 			auth: { test: mockAuthTest },
 			reactions: { add: mockReactionsAdd, remove: mockReactionsRemove },

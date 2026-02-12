@@ -9,7 +9,11 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { App, FileInstallationStore, LogLevel } from "@slack/bolt";
 import winston from "winston";
-import { incrementMessageCount, registerSlashCommands } from "./commands.js";
+import {
+	getEffectiveSessionKey,
+	incrementMessageCount,
+	registerSlashCommands,
+} from "./commands.js";
 import {
 	approveUser,
 	buildPairingMessage,
@@ -257,20 +261,6 @@ function getAckReaction(config: SlackConfig): string {
 }
 
 /**
- * Build session key from Slack context
- */
-function buildSessionKey(
-	channelId: string,
-	userId: string,
-	isDM: boolean,
-): string {
-	if (isDM) {
-		return `slack-dm-${userId}`;
-	}
-	return `slack-channel-${channelId}`;
-}
-
-/**
  * Determine if we should respond to this message
  */
 async function shouldRespond(
@@ -420,7 +410,7 @@ async function handleMessage(
 	// Check if we should respond
 	if (!(await shouldRespond(message, context, config))) {
 		// Still log to session for context
-		const sessionKey = buildSessionKey(context.channel, message.user, isDM);
+		const sessionKey = getEffectiveSessionKey(context.channel, message.user, isDM);
 		try {
 			ctx.logMessage(sessionKey, message.text, {
 				from: message.user,
@@ -461,7 +451,7 @@ async function handleMessage(
 		logger.warn({ msg: "Failed to add reaction", error: String(e) });
 	}
 
-	const sessionKey = buildSessionKey(context.channel, message.user, isDM);
+	const sessionKey = getEffectiveSessionKey(context.channel, message.user, isDM);
 	incrementMessageCount(sessionKey);
 
 	// Determine reply threading

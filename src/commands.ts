@@ -23,6 +23,9 @@ interface SessionState {
 
 const sessionStates = new Map<string, SessionState>();
 
+// Per-user session key overrides set by /session command
+const sessionOverrides = new Map<string, string>();
+
 export function getSessionState(sessionKey: string): SessionState {
 	let state = sessionStates.get(sessionKey);
 	if (!state) {
@@ -112,11 +115,29 @@ function resolveModel(
 // Build a session key from Slack command payload
 // ---------------------------------------------------------------------------
 
-function sessionKeyFromCommand(channelId: string, userId: string): string {
+function baseSessionKey(channelId: string, userId: string): string {
 	if (channelId.startsWith("D")) {
 		return `slack-dm-${userId}`;
 	}
 	return `slack-channel-${channelId}`;
+}
+
+function sessionKeyFromCommand(channelId: string, userId: string): string {
+	const base = baseSessionKey(channelId, userId);
+	return sessionOverrides.get(base) ?? base;
+}
+
+/**
+ * Resolve effective session key, respecting /session overrides.
+ * Used by the message handler in index.ts.
+ */
+export function getEffectiveSessionKey(
+	channelId: string,
+	userId: string,
+	isDM: boolean,
+): string {
+	const base = isDM ? `slack-dm-${userId}` : `slack-channel-${channelId}`;
+	return sessionOverrides.get(base) ?? base;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +187,7 @@ export function registerSlashCommands(
 		resetSession(sessionKey);
 		await respond({
 			response_type: "ephemeral",
-			text: "*Session Reset*\n\nStarting fresh! Your conversation history has been cleared.",
+			text: "*Session Reset*\n\nLocal session state (thinking level, model preference) has been cleared. Note: WOPR core conversation context is not affected.",
 		});
 	});
 
@@ -233,6 +254,18 @@ export function registerSlashCommands(
 		await ack();
 		const level = command.text.trim().toLowerCase();
 		const validLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+		if (!level) {
+			const sessionKey = sessionKeyFromCommand(
+				command.channel_id,
+				command.user_id,
+			);
+			const state = getSessionState(sessionKey);
+			await respond({
+				response_type: "ephemeral",
+				text: `*Current thinking level:* ${state.thinkingLevel}\n\nUsage: \`/think <level>\`\nValid levels: ${validLevels.join(", ")}`,
+			});
+			return;
+		}
 		if (!validLevels.includes(level)) {
 			await respond({
 				response_type: "ephemeral",
@@ -284,6 +317,18 @@ export function registerSlashCommands(
 		await ack();
 		const mode = command.text.trim().toLowerCase();
 		const validModes = ["off", "tokens", "full"];
+		if (!mode) {
+			const sessionKey = sessionKeyFromCommand(
+				command.channel_id,
+				command.user_id,
+			);
+			const state = getSessionState(sessionKey);
+			await respond({
+				response_type: "ephemeral",
+				text: `*Current usage mode:* ${state.usageMode}\n\nUsage: \`/usage <mode>\`\nValid modes: ${validModes.join(", ")}`,
+			});
+			return;
+		}
 		if (!validModes.includes(mode)) {
 			await respond({
 				response_type: "ephemeral",
@@ -348,16 +393,22 @@ export function registerSlashCommands(
 			command.user_id,
 		);
 		const state = getSessionState(sessionKey);
-		state.model = resolved.id;
 
 		if (ctx.setSessionProvider) {
 			try {
 				await ctx.setSessionProvider(sessionKey, resolved.provider, {
 					model: resolved.id,
 				});
-			} catch {
-				// Fall through — state is updated locally even if core call fails
+				state.model = resolved.id;
+			} catch (err) {
+				await respond({
+					response_type: "ephemeral",
+					text: `Failed to switch model: ${err instanceof Error ? err.message : String(err)}`,
+				});
+				return;
 			}
+		} else {
+			state.model = resolved.id;
 		}
 
 		await respond({
@@ -373,13 +424,24 @@ export function registerSlashCommands(
 		if (!name) {
 			await respond({
 				response_type: "ephemeral",
-				text: "Usage: `/session <name>`\n\nSwitch to a named session. Each session maintains separate context.",
+				text: "Usage: `/session <name>` or `/session default`\n\nSwitch to a named session. Each session maintains separate context.\nUse `/session default` to return to the default session.",
 			});
 			return;
 		}
 
-		const baseKey = sessionKeyFromCommand(command.channel_id, command.user_id);
-		const newSessionKey = `${baseKey}/${name}`;
+		const base = baseSessionKey(command.channel_id, command.user_id);
+
+		if (name === "default") {
+			sessionOverrides.delete(base);
+			await respond({
+				response_type: "ephemeral",
+				text: `*Switched to default session:* ${base}`,
+			});
+			return;
+		}
+
+		const newSessionKey = `${base}/${name}`;
+		sessionOverrides.set(base, newSessionKey);
 		await respond({
 			response_type: "ephemeral",
 			text: `*Switched to session:* ${newSessionKey}\n\nEach session maintains separate context.`,

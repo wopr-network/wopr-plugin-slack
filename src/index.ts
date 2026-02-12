@@ -781,8 +781,16 @@ const plugin: WOPRPlugin = {
 			config = { ...config, stateSecret: process.env.SLACK_STATE_SECRET };
 		}
 
-		// Load retry config
-		retryConfig = config.retry || {};
+		// Load retry config — the WebUI schema exposes flat fields (retryMaxRetries,
+		// retryBaseDelay, retryMaxDelay) while SlackConfig types them as a nested
+		// `retry` object. Merge both so either config source works.
+		const rawConfig = config as Record<string, unknown>;
+		const flatRetry: RetryConfig = {
+			...(rawConfig.retryMaxRetries != null && { maxRetries: Number(rawConfig.retryMaxRetries) }),
+			...(rawConfig.retryBaseDelay != null && { baseDelay: Number(rawConfig.retryBaseDelay) }),
+			...(rawConfig.retryMaxDelay != null && { maxDelay: Number(rawConfig.retryMaxDelay) }),
+		};
+		retryConfig = { ...flatRetry, ...config.retry };
 
 		if (!config.enabled) {
 			logger.info("Slack plugin disabled in config");

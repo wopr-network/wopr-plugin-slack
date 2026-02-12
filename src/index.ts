@@ -18,9 +18,11 @@ import {
 	createPairingRequest,
 	isUserAllowed,
 } from "./pairing.js";
+import { withRetry } from "./retry.js";
 import type {
 	AgentIdentity,
 	ConfigSchema,
+	RetryConfig,
 	SlackConfig,
 	StreamMessage,
 	WOPRPlugin,
@@ -66,6 +68,24 @@ let app: App | null = null;
 let ctx: WOPRPluginContext | null = null;
 let agentIdentity: AgentIdentity = { name: "WOPR", emoji: "👀" };
 let cleanupTimer: NodeJS.Timeout | null = null;
+let retryConfig: RetryConfig = {};
+
+/**
+ * Build retry options with logging for a Slack API call
+ */
+function retryOpts(label: string) {
+	return {
+		...retryConfig,
+		onRetry: (attempt: number, delay: number, error: unknown) => {
+			logger.warn({
+				msg: `Retrying Slack API call: ${label}`,
+				attempt,
+				delay,
+				error: String(error),
+			});
+		},
+	};
+}
 
 // Track active streaming sessions
 interface StreamState {
@@ -179,6 +199,30 @@ const configSchema: ConfigSchema = {
 			type: "checkbox",
 			label: "Enabled",
 			default: true,
+		},
+		{
+			name: "retryMaxRetries",
+			type: "text",
+			label: "Max Retries",
+			placeholder: "3",
+			default: "3",
+			description: "Maximum number of retries for rate-limited API calls",
+		},
+		{
+			name: "retryBaseDelay",
+			type: "text",
+			label: "Retry Base Delay (ms)",
+			placeholder: "1000",
+			default: "1000",
+			description: "Base delay in milliseconds for exponential backoff",
+		},
+		{
+			name: "retryMaxDelay",
+			type: "text",
+			label: "Retry Max Delay (ms)",
+			placeholder: "30000",
+			default: "30000",
+			description: "Maximum delay in milliseconds between retries",
 		},
 	],
 };
@@ -311,10 +355,13 @@ async function shouldRespond(
 
 		// Send the pairing message directly via the Slack API
 		try {
-			await app?.client.chat.postMessage({
-				channel: context.channel,
-				text: pairingMsg,
-			});
+			await withRetry(
+				() => app!.client.chat.postMessage({
+					channel: context.channel,
+					text: pairingMsg,
+				}),
+				retryOpts("chat.postMessage:pairing"),
+			);
 		} catch (e) {
 			logger.warn({ msg: "Failed to send pairing message", error: String(e) });
 		}
@@ -401,11 +448,14 @@ async function handleMessage(
 	// Add ack reaction
 	const ackEmoji = getAckReaction(config);
 	try {
-		await app?.client.reactions.add({
-			channel: context.channel,
-			timestamp: message.ts,
-			name: ackEmoji.replace(/:/g, ""), // Remove colons if present
-		});
+		await withRetry(
+			() => app!.client.reactions.add({
+				channel: context.channel,
+				timestamp: message.ts,
+				name: ackEmoji.replace(/:/g, ""), // Remove colons if present
+			}),
+			retryOpts("reactions.add:ack"),
+		);
 	} catch (e) {
 		logger.warn({ msg: "Failed to add reaction", error: String(e) });
 	}
@@ -504,41 +554,56 @@ async function handleMessage(
 
 		// Remove ack reaction and add success
 		try {
-			await app?.client.reactions.remove({
-				channel: context.channel,
-				timestamp: message.ts,
-				name: ackEmoji.replace(/:/g, ""),
-			});
-			await app?.client.reactions.add({
-				channel: context.channel,
-				timestamp: message.ts,
-				name: "white_check_mark",
-			});
+			await withRetry(
+				() => app!.client.reactions.remove({
+					channel: context.channel,
+					timestamp: message.ts,
+					name: ackEmoji.replace(/:/g, ""),
+				}),
+				retryOpts("reactions.remove:ack"),
+			);
+			await withRetry(
+				() => app!.client.reactions.add({
+					channel: context.channel,
+					timestamp: message.ts,
+					name: "white_check_mark",
+				}),
+				retryOpts("reactions.add:success"),
+			);
 		} catch (e) {}
 	} catch (error: any) {
 		logger.error({ msg: "Inject failed", error: String(error) });
 
 		// Update message with error
 		try {
-			await app?.client.chat.update({
-				channel: streamState.channelId,
-				ts: streamState.messageTs,
-				text: "❌ Error processing your request. Please try again.",
-			});
+			await withRetry(
+				() => app!.client.chat.update({
+					channel: streamState.channelId,
+					ts: streamState.messageTs,
+					text: "❌ Error processing your request. Please try again.",
+				}),
+				retryOpts("chat.update:error"),
+			);
 		} catch (e) {}
 
 		// Remove ack and add error reaction
 		try {
-			await app?.client.reactions.remove({
-				channel: context.channel,
-				timestamp: message.ts,
-				name: ackEmoji.replace(/:/g, ""),
-			});
-			await app?.client.reactions.add({
-				channel: context.channel,
-				timestamp: message.ts,
-				name: "x",
-			});
+			await withRetry(
+				() => app!.client.reactions.remove({
+					channel: context.channel,
+					timestamp: message.ts,
+					name: ackEmoji.replace(/:/g, ""),
+				}),
+				retryOpts("reactions.remove:ack-error"),
+			);
+			await withRetry(
+				() => app!.client.reactions.add({
+					channel: context.channel,
+					timestamp: message.ts,
+					name: "x",
+				}),
+				retryOpts("reactions.add:error"),
+			);
 		} catch (e) {}
 	} finally {
 		activeStreams.delete(sessionKey);
@@ -561,11 +626,14 @@ async function updateMessage(
 	}
 
 	try {
-		await app.client.chat.update({
-			channel: state.channelId,
-			ts: state.messageTs,
-			text,
-		});
+		await withRetry(
+			() => app!.client.chat.update({
+				channel: state.channelId,
+				ts: state.messageTs,
+				text,
+			}),
+			retryOpts("chat.update:stream"),
+		);
 		state.lastEdit = Date.now();
 	} catch (e) {
 		logger.warn({ msg: "Failed to update message", error: String(e) });
@@ -589,11 +657,14 @@ async function finalizeMessage(
 	}
 
 	try {
-		await app.client.chat.update({
-			channel: state.channelId,
-			ts: state.messageTs,
-			text,
-		});
+		await withRetry(
+			() => app!.client.chat.update({
+				channel: state.channelId,
+				ts: state.messageTs,
+				text,
+			}),
+			retryOpts("chat.update:finalize"),
+		);
 	} catch (e) {
 		logger.warn({ msg: "Failed to finalize message", error: String(e) });
 	}
@@ -710,6 +781,9 @@ const plugin: WOPRPlugin = {
 			config = { ...config, stateSecret: process.env.SLACK_STATE_SECRET };
 		}
 
+		// Load retry config
+		retryConfig = config.retry || {};
+
 		if (!config.enabled) {
 			logger.info("Slack plugin disabled in config");
 			return;
@@ -727,7 +801,10 @@ const plugin: WOPRPlugin = {
 			app = await initSlackApp(config);
 
 			// Store bot user ID for mention detection
-			const authTest = await app.client.auth.test();
+			const authTest = await withRetry(
+				() => app!.client.auth.test(),
+				retryOpts("auth.test"),
+			);
 			const botUserId = authTest.user_id;
 
 			// Message handler

@@ -102,6 +102,13 @@ export interface WOPRPlugin {
 	shutdown?: () => Promise<void>;
 }
 
+// Retry configuration
+export interface RetryConfig {
+	maxRetries?: number; // Default: 3
+	baseDelay?: number; // Default: 1000ms
+	maxDelay?: number; // Default: 30000ms
+}
+
 // Slack-specific types
 export interface SlackConfig {
 	enabled?: boolean;
@@ -140,4 +147,7 @@ export interface SlackConfig {
 
 	// Threading
 	replyToMode?: "off" | "first" | "all";
+
+	// Retry settings
+	retry?: RetryConfig;
 }

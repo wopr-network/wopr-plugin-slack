@@ -65,12 +65,10 @@ function generateCode(): string {
  * Generate a unique pairing code
  */
 function generateUniqueCode(): string {
-	const existingCodes = new Set(
-		Array.from(pendingPairings.values()).map((p) => p.code),
-	);
 	for (let attempt = 0; attempt < 100; attempt++) {
 		const code = generateCode();
-		if (!existingCodes.has(code)) {
+		// Check the live map directly to avoid race conditions with a stale snapshot
+		if (!pendingPairings.has(code)) {
 			return code;
 		}
 	}
@@ -90,8 +88,11 @@ export function checkRequestRateLimit(userId: string): boolean {
 		return true;
 	}
 
+	if (attempt.count >= REQUEST_RATE_LIMIT_MAX) {
+		return false;
+	}
 	attempt.count++;
-	return attempt.count <= REQUEST_RATE_LIMIT_MAX;
+	return true;
 }
 
 /**
@@ -136,8 +137,11 @@ export function checkClaimRateLimit(sourceId: string): boolean {
 		return true;
 	}
 
+	if (attempt.count >= CLAIM_RATE_LIMIT_MAX_ATTEMPTS) {
+		return false;
+	}
 	attempt.count++;
-	return attempt.count <= CLAIM_RATE_LIMIT_MAX_ATTEMPTS;
+	return true;
 }
 
 /**
@@ -296,6 +300,12 @@ export async function approveUser(
 	// Add user if not already present
 	if (!config.channels.slack.dm.allowFrom.includes(userId)) {
 		config.channels.slack.dm.allowFrom.push(userId);
-		await ctx.saveConfig(config);
+		try {
+			await ctx.saveConfig(config);
+		} catch (error) {
+			throw new Error(
+				`Failed to save config after approving user ${userId}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 	}
 }

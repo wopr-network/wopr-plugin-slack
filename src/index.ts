@@ -242,7 +242,11 @@ async function shouldRespond(
 				message.user,
 			);
 			if (request && ctx) {
-				await approveUser(ctx, request.slackUserId);
+				try {
+					await approveUser(ctx, request.slackUserId);
+				} catch (e) {
+					logger.error({ msg: "Failed to approve user after pairing claim", user: message.user, error: String(e) });
+				}
 				logger.info({ msg: "Pairing claimed via DM", user: message.user });
 				// Send confirmation — we'll respond via the say callback if available
 				// Store the approval message in a special field so handleMessage can send it
@@ -350,7 +354,8 @@ async function handleMessage(
 		return;
 	}
 
-	// If user was just approved via pairing, send confirmation before processing
+	// If user was just approved via pairing, send confirmation and return early
+	// so the original code string doesn't get processed as regular input
 	if ((message as any).__pairingApproved) {
 		try {
 			await say({
@@ -362,6 +367,7 @@ async function handleMessage(
 				error: String(e),
 			});
 		}
+		return;
 	}
 
 	// Add ack reaction

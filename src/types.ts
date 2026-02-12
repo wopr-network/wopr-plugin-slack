@@ -111,6 +111,11 @@ export interface SlackConfig {
 	signingSecret?: string; // Required for HTTP mode
 	webhookPath?: string; // For HTTP mode (default: /slack/events)
 
+	// OAuth / token rotation (for granular permissions with 90-day token expiry)
+	clientId?: string;
+	clientSecret?: string;
+	stateSecret?: string;
+
 	// DM settings
 	dm?: {
 		enabled?: boolean;

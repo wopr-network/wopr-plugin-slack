@@ -32,6 +32,7 @@ vi.mock("@slack/bolt", () => {
 	}
 	return {
 		App: MockApp,
+		FileInstallationStore: vi.fn(),
 		LogLevel: { INFO: "info", DEBUG: "debug" },
 	};
 });

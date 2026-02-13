@@ -6,9 +6,8 @@
  */
 
 import crypto from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { pipeline } from "node:stream/promises";
 import { App, FileInstallationStore, LogLevel } from "@slack/bolt";
 import winston from "winston";
 import {
@@ -388,8 +387,17 @@ export async function saveAttachments(
 ): Promise<string[]> {
 	if (!files || files.length === 0) return [];
 
-	if (!existsSync(ATTACHMENTS_DIR)) {
-		mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+	try {
+		if (!existsSync(ATTACHMENTS_DIR)) {
+			mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+		}
+	} catch (err) {
+		logger.error({
+			msg: "Failed to create attachments directory",
+			dir: ATTACHMENTS_DIR,
+			error: String(err),
+		});
+		return [];
 	}
 
 	const savedPaths: string[] = [];
@@ -422,8 +430,8 @@ export async function saveAttachments(
 				continue;
 			}
 
-			const fileStream = createWriteStream(filepath);
-			await pipeline(response.body as any, fileStream);
+			const arrayBuf = await response.arrayBuffer();
+			writeFileSync(filepath, Buffer.from(arrayBuf));
 
 			savedPaths.push(filepath);
 			logger.info({
@@ -753,16 +761,17 @@ async function handleMessage(
 
 		// Handle file attachments
 		let messageContent: string = message.text || "";
+		const effectiveBotToken = context.botToken || storedBotToken;
 		if (
 			message.files &&
 			Array.isArray(message.files) &&
 			message.files.length > 0 &&
-			storedBotToken
+			effectiveBotToken
 		) {
 			const attachmentPaths = await saveAttachments(
 				message.files as SlackFile[],
 				message.user,
-				storedBotToken,
+				effectiveBotToken,
 			);
 			if (attachmentPaths.length > 0) {
 				const attachmentInfo = attachmentPaths
@@ -777,6 +786,27 @@ async function handleMessage(
 					channel: context.channel,
 				});
 			}
+		}
+
+		// Skip injection if content is empty (e.g., file-only message where all downloads failed)
+		if (!messageContent.trim()) {
+			logger.warn({
+				msg: "Skipping inject — message content is empty after attachment handling",
+				user: message.user,
+				channel: context.channel,
+			});
+			// Clean up the "Thinking..." placeholder
+			try {
+				await withRetry(
+					() =>
+						app!.client.chat.delete({
+							channel: streamState.channelId,
+							ts: streamState.messageTs,
+						}),
+					retryOpts("chat.delete:empty"),
+				);
+			} catch (_e) {}
+			return;
 		}
 
 		// Inject to WOPR

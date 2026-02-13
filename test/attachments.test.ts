@@ -1,15 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import path from "node:path";
-import { existsSync, rmSync } from "node:fs";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Track fetch calls for attachment downloads
 const fetchMock = vi.fn();
 global.fetch = fetchMock as any;
 
+/** Helper: build a mock fetch Response with arrayBuffer() */
+function mockFetchOk(data: string) {
+	const buf = new TextEncoder().encode(data).buffer;
+	return { ok: true, arrayBuffer: () => Promise.resolve(buf) };
+}
+
 // Mock fs functions used by saveAttachments
 const mockExistsSync = vi.fn().mockReturnValue(true);
 const mockMkdirSync = vi.fn();
-const mockCreateWriteStream = vi.fn();
+const mockWriteFileSync = vi.fn();
 
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -17,13 +21,9 @@ vi.mock("node:fs", async () => {
 		...actual,
 		existsSync: (...args: any[]) => mockExistsSync(...args),
 		mkdirSync: (...args: any[]) => mockMkdirSync(...args),
-		createWriteStream: (...args: any[]) => mockCreateWriteStream(...args),
+		writeFileSync: (...args: any[]) => mockWriteFileSync(...args),
 	};
 });
-
-vi.mock("node:stream/promises", () => ({
-	pipeline: vi.fn().mockResolvedValue(undefined),
-}));
 
 vi.mock("winston", () => {
 	const mockLogger = {
@@ -63,6 +63,7 @@ const sharedBoltMocks = {
 	reactionsRemove: vi.fn(),
 	chatUpdate: vi.fn(),
 	chatPostMessage: vi.fn(),
+	chatDelete: vi.fn(),
 };
 
 vi.mock("@slack/bolt", () => {
@@ -75,7 +76,7 @@ vi.mock("@slack/bolt", () => {
 		client = {
 			auth: { test: sharedBoltMocks.authTest },
 			reactions: { add: sharedBoltMocks.reactionsAdd, remove: sharedBoltMocks.reactionsRemove },
-			chat: { update: sharedBoltMocks.chatUpdate, postMessage: sharedBoltMocks.chatPostMessage },
+			chat: { update: sharedBoltMocks.chatUpdate, postMessage: sharedBoltMocks.chatPostMessage, delete: sharedBoltMocks.chatDelete },
 		};
 	}
 	return {
@@ -89,7 +90,6 @@ describe("saveAttachments", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockExistsSync.mockReturnValue(true);
-		mockCreateWriteStream.mockReturnValue({});
 	});
 
 	it("returns empty array when no files provided", async () => {
@@ -99,10 +99,7 @@ describe("saveAttachments", () => {
 	});
 
 	it("downloads files using bot token in Authorization header", async () => {
-		fetchMock.mockResolvedValueOnce({
-			ok: true,
-			body: Buffer.from("file content"),
-		});
+		fetchMock.mockResolvedValueOnce(mockFetchOk("file content"));
 
 		const { saveAttachments } = await import("../src/index.js");
 		const files = [
@@ -126,10 +123,7 @@ describe("saveAttachments", () => {
 	});
 
 	it("falls back to url_private when url_private_download is missing", async () => {
-		fetchMock.mockResolvedValueOnce({
-			ok: true,
-			body: Buffer.from("file content"),
-		});
+		fetchMock.mockResolvedValueOnce(mockFetchOk("file content"));
 
 		const { saveAttachments } = await import("../src/index.js");
 		const files = [
@@ -178,9 +172,9 @@ describe("saveAttachments", () => {
 
 	it("handles multiple files and continues on individual failures", async () => {
 		fetchMock
-			.mockResolvedValueOnce({ ok: true, body: Buffer.from("a") })
+			.mockResolvedValueOnce(mockFetchOk("a"))
 			.mockResolvedValueOnce({ ok: false, status: 500 })
-			.mockResolvedValueOnce({ ok: true, body: Buffer.from("c") });
+			.mockResolvedValueOnce(mockFetchOk("c"));
 
 		const { saveAttachments } = await import("../src/index.js");
 		const files = [
@@ -208,10 +202,7 @@ describe("saveAttachments", () => {
 	});
 
 	it("sanitizes filenames to remove special characters", async () => {
-		fetchMock.mockResolvedValueOnce({
-			ok: true,
-			body: Buffer.from("data"),
-		});
+		fetchMock.mockResolvedValueOnce(mockFetchOk("data"));
 
 		const { saveAttachments } = await import("../src/index.js");
 		const files = [
@@ -232,10 +223,7 @@ describe("saveAttachments", () => {
 		// First call for ATTACHMENTS_DIR constant (module-level) returns true
 		// Second call inside saveAttachments returns false (dir doesn't exist)
 		mockExistsSync.mockReturnValue(false);
-		fetchMock.mockResolvedValueOnce({
-			ok: true,
-			body: Buffer.from("data"),
-		});
+		fetchMock.mockResolvedValueOnce(mockFetchOk("data"));
 
 		const { saveAttachments } = await import("../src/index.js");
 		const files = [
@@ -270,10 +258,7 @@ describe("saveAttachments", () => {
 	});
 
 	it("uses default name 'attachment' when file.name is undefined", async () => {
-		fetchMock.mockResolvedValueOnce({
-			ok: true,
-			body: Buffer.from("data"),
-		});
+		fetchMock.mockResolvedValueOnce(mockFetchOk("data"));
 
 		const { saveAttachments } = await import("../src/index.js");
 		const files = [
@@ -294,7 +279,6 @@ describe("message handler file attachment integration", () => {
 		vi.clearAllMocks();
 		sharedBoltMocks.authTest.mockResolvedValue({ user_id: "UBOT123" });
 		mockExistsSync.mockReturnValue(true);
-		mockCreateWriteStream.mockReturnValue({});
 	});
 
 	function mockContext(configOverride: Record<string, any> = {}) {
@@ -384,10 +368,7 @@ describe("message handler file attachment integration", () => {
 	}
 
 	it("processes messages with files but no text", async () => {
-		fetchMock.mockResolvedValueOnce({
-			ok: true,
-			body: Buffer.from("file data"),
-		});
+		fetchMock.mockResolvedValueOnce(mockFetchOk("file data"));
 
 		const { ctx, messageHandler } = await initPluginWithConfig({
 			dm: { enabled: true, policy: "open" },
@@ -420,10 +401,7 @@ describe("message handler file attachment integration", () => {
 	});
 
 	it("appends attachment paths to text content", async () => {
-		fetchMock.mockResolvedValueOnce({
-			ok: true,
-			body: Buffer.from("image data"),
-		});
+		fetchMock.mockResolvedValueOnce(mockFetchOk("image data"));
 
 		const { ctx, messageHandler } = await initPluginWithConfig({
 			dm: { enabled: true, policy: "open" },
@@ -458,8 +436,8 @@ describe("message handler file attachment integration", () => {
 
 	it("handles multiple file attachments", async () => {
 		fetchMock
-			.mockResolvedValueOnce({ ok: true, body: Buffer.from("a") })
-			.mockResolvedValueOnce({ ok: true, body: Buffer.from("b") });
+			.mockResolvedValueOnce(mockFetchOk("a"))
+			.mockResolvedValueOnce(mockFetchOk("b"));
 
 		const { ctx, messageHandler } = await initPluginWithConfig({
 			dm: { enabled: true, policy: "open" },

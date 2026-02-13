@@ -24,6 +24,7 @@ import {
 	isUserAllowed,
 } from "./pairing.js";
 import { withRetry } from "./retry.js";
+import { startTyping, stopTyping, stopAllTyping } from "./typing.js";
 import type {
 	AgentIdentity,
 	ChannelCommand,
@@ -590,6 +591,13 @@ async function handleMessage(
 
 		streamState.messageTs = initialResponse.ts;
 
+		// Start typing indicator (animates the placeholder until content arrives)
+		startTyping(sessionKey, context.channel, streamState.messageTs, {
+			chatUpdate: (params) => app!.client.chat.update(params),
+			retryOpts: retryOpts("chat.update:typing"),
+			logger,
+		});
+
 		// Stream handling
 		let buffer = "";
 		let lastFlush = Date.now();
@@ -611,6 +619,9 @@ async function handleMessage(
 			}
 
 			if (!textContent) return;
+
+			// Stop typing animation once real content starts flowing
+			stopTyping(sessionKey);
 
 			buffer += textContent;
 			const now = Date.now();
@@ -645,7 +656,8 @@ async function handleMessage(
 			onStream: handleChunk,
 		});
 
-		// Finalize
+		// Finalize — stop typing indicator before final message update
+		stopTyping(sessionKey);
 		if (finalizeTimer) clearTimeout(finalizeTimer);
 		if (!streamState.isFinalized) {
 			const finalText = buffer || response;
@@ -672,6 +684,7 @@ async function handleMessage(
 			);
 		} catch (e) {}
 	} catch (error: any) {
+		stopTyping(sessionKey);
 		logger.error({ msg: "Inject failed", error: String(error) });
 
 		// Update message with error
@@ -1021,6 +1034,7 @@ const plugin: WOPRPlugin = {
 	},
 
 	async shutdown() {
+		stopAllTyping();
 		if (cleanupTimer) {
 			clearInterval(cleanupTimer);
 			cleanupTimer = null;

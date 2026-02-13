@@ -24,7 +24,7 @@ import {
 	isUserAllowed,
 } from "./pairing.js";
 import { withRetry } from "./retry.js";
-import { startTyping, stopTyping, stopAllTyping, tickTyping } from "./typing.js";
+import { startTyping, stopTyping, stopAllTyping } from "./typing.js";
 import type {
 	AgentIdentity,
 	ChannelCommand,
@@ -622,9 +622,6 @@ async function handleMessage(
 
 			// Stop typing animation once real content starts flowing
 			stopTyping(sessionKey);
-
-			// Tick typing activity (keeps indicator alive if it hasn't been stopped yet)
-			tickTyping(sessionKey);
 
 			buffer += textContent;
 			const now = Date.now();

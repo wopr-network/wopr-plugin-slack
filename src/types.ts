@@ -8,27 +8,26 @@
 // Re-export shared types used by this plugin
 export type {
 	AgentIdentity,
+	ChannelCommand,
+	ChannelCommandContext,
+	ChannelMessageContext,
+	ChannelMessageParser,
+	ChannelProvider,
+	ChannelRef,
 	ConfigField,
 	ConfigSchema,
+	PluginCommand,
 	PluginLogger,
+	PluginManifest,
 	StreamMessage,
 	UserProfile,
 	WOPRPlugin,
 	WOPRPluginContext,
 } from "@wopr-network/plugin-types";
 
-// Re-export renamed types with local aliases for backward compatibility
-export type { ChannelRef as ChannelInfo } from "@wopr-network/plugin-types";
-export type { PluginInjectOptions as InjectOptions } from "@wopr-network/plugin-types";
-
 // ---------------------------------------------------------------------------
 // Plugin-specific types (not in the shared package)
 // ---------------------------------------------------------------------------
-
-export interface LogMessageOptions {
-	from?: string;
-	channel?: { type: string; id: string; name?: string };
-}
 
 export interface ProviderInfo {
 	id: string;

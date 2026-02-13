@@ -26,6 +26,11 @@ import {
 import { withRetry } from "./retry.js";
 import type {
 	AgentIdentity,
+	ChannelCommand,
+	ChannelCommandContext,
+	ChannelMessageContext,
+	ChannelMessageParser,
+	ChannelProvider,
 	ConfigSchema,
 	RetryConfig,
 	SlackConfig,
@@ -103,6 +108,109 @@ interface StreamState {
 }
 
 const activeStreams = new Map<string, StreamState>();
+
+// ============================================================================
+// Channel Provider (cross-plugin command/parser registration)
+// ============================================================================
+
+const registeredCommands: Map<string, ChannelCommand> = new Map();
+const registeredParsers: Map<string, ChannelMessageParser> = new Map();
+
+const slackChannelProvider: ChannelProvider = {
+	id: "slack",
+
+	registerCommand(cmd: ChannelCommand): void {
+		registeredCommands.set(cmd.name, cmd);
+		logger.info({ msg: "Channel command registered", name: cmd.name });
+	},
+
+	unregisterCommand(name: string): void {
+		registeredCommands.delete(name);
+	},
+
+	getCommands(): ChannelCommand[] {
+		return Array.from(registeredCommands.values());
+	},
+
+	addMessageParser(parser: ChannelMessageParser): void {
+		registeredParsers.set(parser.id, parser);
+		logger.info({ msg: "Message parser registered", id: parser.id });
+	},
+
+	removeMessageParser(id: string): void {
+		registeredParsers.delete(id);
+	},
+
+	getMessageParsers(): ChannelMessageParser[] {
+		return Array.from(registeredParsers.values());
+	},
+
+	async send(channelId: string, content: string): Promise<void> {
+		if (!app) throw new Error("Slack app not initialized");
+		// Split content into chunks of SLACK_LIMIT chars
+		const chunks: string[] = [];
+		let remaining = content;
+		while (remaining.length > 0) {
+			if (remaining.length <= SLACK_LIMIT) {
+				chunks.push(remaining);
+				break;
+			}
+			let splitAt = remaining.lastIndexOf("\n", SLACK_LIMIT);
+			if (splitAt < SLACK_LIMIT - 500) splitAt = remaining.lastIndexOf(" ", SLACK_LIMIT);
+			if (splitAt < SLACK_LIMIT - 500) splitAt = SLACK_LIMIT;
+			chunks.push(remaining.slice(0, splitAt));
+			remaining = remaining.slice(splitAt).trimStart();
+		}
+		for (const chunk of chunks) {
+			if (chunk.trim()) {
+				await withRetry(
+					() => app!.client.chat.postMessage({ channel: channelId, text: chunk }),
+					retryOpts("chat.postMessage:channelProvider"),
+				);
+			}
+		}
+	},
+
+	getBotUsername(): string {
+		return botUsername || "unknown";
+	},
+};
+
+// ============================================================================
+// Extension API (for cross-plugin and CLI access)
+// ============================================================================
+
+const slackExtension = {
+	getBotUsername: () => botUsername || "unknown",
+
+	claimOwnership: async (
+		code: string,
+		sourceId?: string,
+		claimingUserId?: string,
+	): Promise<{ success: boolean; userId?: string; username?: string; error?: string }> => {
+		if (!ctx) return { success: false, error: "Slack plugin not initialized" };
+
+		const result = claimPairingCode(code, sourceId, claimingUserId);
+		if (!result.request) {
+			return { success: false, error: result.error || "Invalid or expired pairing code" };
+		}
+
+		try {
+			await approveUser(ctx, result.request.slackUserId);
+		} catch (e) {
+			return { success: false, error: `Failed to approve user: ${e instanceof Error ? e.message : String(e)}` };
+		}
+
+		return {
+			success: true,
+			userId: result.request.slackUserId,
+			username: result.request.slackUsername,
+		};
+	},
+};
+
+// Store bot username for ChannelProvider
+let botUsername = "";
 
 // Config schema for WebUI
 const configSchema: ConfigSchema = {
@@ -739,9 +847,68 @@ const plugin: WOPRPlugin = {
 	version: "1.0.0",
 	description: "Slack integration with Socket Mode and HTTP webhook support",
 
+	commands: [
+		{
+			name: "slack",
+			description: "Slack plugin commands",
+			usage: "wopr slack claim <code>",
+			async handler(_context: WOPRPluginContext, args: string[]) {
+				const [subcommand, ...rest] = args;
+
+				if (subcommand === "claim") {
+					const code = rest[0];
+					if (!code) {
+						console.log("Usage: wopr slack claim <code>");
+						console.log("  Claim a pairing code to approve your Slack account");
+						process.exit(1);
+					}
+
+					try {
+						const response = await fetch("http://localhost:7437/plugins/slack/claim", {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({ code }),
+						});
+						const result = (await response.json()) as {
+							success?: boolean;
+							userId?: string;
+							username?: string;
+							error?: string;
+						};
+
+						if (result.success) {
+							console.log("Slack account paired successfully!");
+							console.log(`  User: ${result.username} (${result.userId})`);
+							process.exit(0);
+						} else {
+							console.log(`Failed to claim: ${result.error || "Unknown error"}`);
+							process.exit(1);
+						}
+					} catch (_err) {
+						console.log("Error: Could not connect to WOPR daemon. Is it running?");
+						console.log("  Start it with: wopr daemon start");
+						process.exit(1);
+					}
+				} else {
+					console.log("Slack plugin commands:");
+					console.log("  wopr slack claim <code>  - Claim a pairing code to approve your Slack account");
+					process.exit(subcommand ? 1 : 0);
+				}
+			},
+		},
+	],
+
 	async init(context: WOPRPluginContext) {
 		ctx = context;
 		ctx.registerConfigSchema("wopr-plugin-slack", configSchema);
+
+		// Register as a channel provider so other plugins can add commands/parsers
+		ctx.registerChannelProvider(slackChannelProvider);
+		logger.info("Registered Slack channel provider");
+
+		// Register the Slack extension so other plugins can interact with Slack
+		ctx.registerExtension("slack", slackExtension);
+		logger.info("Registered Slack extension");
 
 		// Load agent identity
 		await refreshIdentity();
@@ -806,6 +973,7 @@ const plugin: WOPRPlugin = {
 				retryOpts("auth.test"),
 			);
 			const botUserId = authTest.user_id;
+			botUsername = (authTest.user as string) || "";
 
 			// Message handler
 			app.message(async ({ message, context, say }) => {
@@ -856,6 +1024,10 @@ const plugin: WOPRPlugin = {
 		if (cleanupTimer) {
 			clearInterval(cleanupTimer);
 			cleanupTimer = null;
+		}
+		if (ctx) {
+			ctx.unregisterChannelProvider("slack");
+			ctx.unregisterExtension("slack");
 		}
 		if (app) {
 			await app.stop();

@@ -6,6 +6,7 @@
  */
 
 import crypto from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { App, FileInstallationStore, LogLevel } from "@slack/bolt";
 import winston from "winston";
@@ -157,7 +158,8 @@ const slackChannelProvider: ChannelProvider = {
 				break;
 			}
 			let splitAt = remaining.lastIndexOf("\n", SLACK_LIMIT);
-			if (splitAt < SLACK_LIMIT - 500) splitAt = remaining.lastIndexOf(" ", SLACK_LIMIT);
+			if (splitAt < SLACK_LIMIT - 500)
+				splitAt = remaining.lastIndexOf(" ", SLACK_LIMIT);
 			if (splitAt < SLACK_LIMIT - 500) splitAt = SLACK_LIMIT;
 			chunks.push(remaining.slice(0, splitAt));
 			remaining = remaining.slice(splitAt).trimStart();
@@ -165,7 +167,8 @@ const slackChannelProvider: ChannelProvider = {
 		for (const chunk of chunks) {
 			if (chunk.trim()) {
 				await withRetry(
-					() => app!.client.chat.postMessage({ channel: channelId, text: chunk }),
+					() =>
+						app!.client.chat.postMessage({ channel: channelId, text: chunk }),
 					retryOpts("chat.postMessage:channelProvider"),
 				);
 			}
@@ -188,18 +191,29 @@ const slackExtension = {
 		code: string,
 		sourceId?: string,
 		claimingUserId?: string,
-	): Promise<{ success: boolean; userId?: string; username?: string; error?: string }> => {
+	): Promise<{
+		success: boolean;
+		userId?: string;
+		username?: string;
+		error?: string;
+	}> => {
 		if (!ctx) return { success: false, error: "Slack plugin not initialized" };
 
 		const result = claimPairingCode(code, sourceId, claimingUserId);
 		if (!result.request) {
-			return { success: false, error: result.error || "Invalid or expired pairing code" };
+			return {
+				success: false,
+				error: result.error || "Invalid or expired pairing code",
+			};
 		}
 
 		try {
 			await approveUser(ctx, result.request.slackUserId);
 		} catch (e) {
-			return { success: false, error: `Failed to approve user: ${e instanceof Error ? e.message : String(e)}` };
+			return {
+				success: false,
+				error: `Failed to approve user: ${e instanceof Error ? e.message : String(e)}`,
+			};
 		}
 
 		return {
@@ -210,8 +224,9 @@ const slackExtension = {
 	},
 };
 
-// Store bot username for ChannelProvider
+// Store bot username and token for ChannelProvider and file downloads
 let botUsername = "";
+let storedBotToken = "";
 
 // Config schema for WebUI
 const configSchema: ConfigSchema = {
@@ -346,6 +361,99 @@ const SLACK_LIMIT = 4000;
 const EDIT_THRESHOLD = 1500; // Edit after 1500 new chars
 const IDLE_SPLIT_MS = 1000; // New message after 1s idle
 
+// Attachments directory (same convention as Discord plugin)
+const ATTACHMENTS_DIR = existsSync("/data")
+	? "/data/attachments"
+	: path.join(process.env.WOPR_HOME || "/tmp/wopr-test", "data", "attachments");
+
+/** Slack file object shape (subset of fields we use) */
+interface SlackFile {
+	id: string;
+	name?: string;
+	url_private_download?: string;
+	url_private?: string;
+	size?: number;
+	mimetype?: string;
+}
+
+/**
+ * Download Slack file attachments to disk.
+ * Slack files require the bot token in the Authorization header.
+ * Returns an array of saved file paths.
+ */
+export async function saveAttachments(
+	files: SlackFile[],
+	userId: string,
+	botToken: string,
+): Promise<string[]> {
+	if (!files || files.length === 0) return [];
+
+	try {
+		if (!existsSync(ATTACHMENTS_DIR)) {
+			mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+		}
+	} catch (err) {
+		logger.error({
+			msg: "Failed to create attachments directory",
+			dir: ATTACHMENTS_DIR,
+			error: String(err),
+		});
+		return [];
+	}
+
+	const savedPaths: string[] = [];
+
+	for (const file of files) {
+		const downloadUrl = file.url_private_download || file.url_private;
+		if (!downloadUrl) {
+			logger.warn({ msg: "Slack file has no download URL", fileId: file.id });
+			continue;
+		}
+
+		try {
+			const timestamp = Date.now();
+			const safeName =
+				file.name?.replace(/[^a-zA-Z0-9._-]/g, "_") || "attachment";
+			const filename = `${timestamp}-${userId}-${safeName}`;
+			const filepath = path.join(ATTACHMENTS_DIR, filename);
+
+			const response = await fetch(downloadUrl, {
+				headers: { Authorization: `Bearer ${botToken}` },
+			});
+
+			if (!response.ok) {
+				logger.warn({
+					msg: "Failed to download Slack file",
+					fileId: file.id,
+					url: downloadUrl,
+					status: response.status,
+				});
+				continue;
+			}
+
+			const arrayBuf = await response.arrayBuffer();
+			writeFileSync(filepath, Buffer.from(arrayBuf));
+
+			savedPaths.push(filepath);
+			logger.info({
+				msg: "Slack attachment saved",
+				filename,
+				size: file.size,
+				mimetype: file.mimetype,
+			});
+		} catch (err) {
+			logger.error({
+				msg: "Error saving Slack attachment",
+				fileId: file.id,
+				name: file.name,
+				error: String(err),
+			});
+		}
+	}
+
+	return savedPaths;
+}
+
 /**
  * Refresh agent identity from workspace
  */
@@ -456,10 +564,11 @@ async function shouldRespond(
 		// Send the pairing message directly via the Slack API
 		try {
 			await withRetry(
-				() => app!.client.chat.postMessage({
-					channel: context.channel,
-					text: pairingMsg,
-				}),
+				() =>
+					app!.client.chat.postMessage({
+						channel: context.channel,
+						text: pairingMsg,
+					}),
 				retryOpts("chat.postMessage:pairing"),
 			);
 		} catch (e) {
@@ -519,7 +628,11 @@ async function handleMessage(
 	// Check if we should respond
 	if (!(await shouldRespond(message, context, config))) {
 		// Still log to session for context
-		const sessionKey = getEffectiveSessionKey(context.channel, message.user, isDM);
+		const sessionKey = getEffectiveSessionKey(
+			context.channel,
+			message.user,
+			isDM,
+		);
 		try {
 			ctx.logMessage(sessionKey, message.text, {
 				from: message.user,
@@ -549,18 +662,23 @@ async function handleMessage(
 	const ackEmoji = getAckReaction(config);
 	try {
 		await withRetry(
-			() => app!.client.reactions.add({
-				channel: context.channel,
-				timestamp: message.ts,
-				name: ackEmoji.replace(/:/g, ""), // Remove colons if present
-			}),
+			() =>
+				app!.client.reactions.add({
+					channel: context.channel,
+					timestamp: message.ts,
+					name: ackEmoji.replace(/:/g, ""), // Remove colons if present
+				}),
 			retryOpts("reactions.add:ack"),
 		);
 	} catch (e) {
 		logger.warn({ msg: "Failed to add reaction", error: String(e) });
 	}
 
-	const sessionKey = getEffectiveSessionKey(context.channel, message.user, isDM);
+	const sessionKey = getEffectiveSessionKey(
+		context.channel,
+		message.user,
+		isDM,
+	);
 	incrementMessageCount(sessionKey);
 
 	// Determine reply threading
@@ -609,7 +727,10 @@ async function handleMessage(
 			let textContent = "";
 			if (msg.type === "text" && msg.content) {
 				textContent = msg.content;
-			} else if ((msg.type as string) === "assistant" && (msg as any).message?.content) {
+			} else if (
+				(msg.type as string) === "assistant" &&
+				(msg as any).message?.content
+			) {
 				const content = (msg as any).message.content;
 				if (Array.isArray(content)) {
 					textContent = content.map((c: any) => c.text || "").join("");
@@ -649,8 +770,58 @@ async function handleMessage(
 			}, 2000);
 		};
 
+		// Handle file attachments
+		let messageContent: string = message.text || "";
+		const effectiveBotToken = context.botToken || storedBotToken;
+		if (
+			message.files &&
+			Array.isArray(message.files) &&
+			message.files.length > 0 &&
+			effectiveBotToken
+		) {
+			const attachmentPaths = await saveAttachments(
+				message.files as SlackFile[],
+				message.user,
+				effectiveBotToken,
+			);
+			if (attachmentPaths.length > 0) {
+				const attachmentInfo = attachmentPaths
+					.map((p: string) => `[Attachment: ${p}]`)
+					.join("\n");
+				messageContent = messageContent
+					? `${messageContent}\n\n${attachmentInfo}`
+					: attachmentInfo;
+				logger.info({
+					msg: "Attachments appended to message",
+					count: attachmentPaths.length,
+					channel: context.channel,
+				});
+			}
+		}
+
+		// Skip injection if content is empty (e.g., file-only message where all downloads failed)
+		if (!messageContent.trim()) {
+			logger.warn({
+				msg: "Skipping inject — message content is empty after attachment handling",
+				user: message.user,
+				channel: context.channel,
+			});
+			// Clean up the "Thinking..." placeholder
+			try {
+				await withRetry(
+					() =>
+						app!.client.chat.delete({
+							channel: streamState.channelId,
+							ts: streamState.messageTs,
+						}),
+					retryOpts("chat.delete:empty"),
+				);
+			} catch (_e) {}
+			return;
+		}
+
 		// Inject to WOPR
-		const response = await ctx.inject(sessionKey, message.text, {
+		const response = await ctx.inject(sessionKey, messageContent, {
 			from: message.user,
 			channel: { type: "slack", id: context.channel },
 			onStream: handleChunk,
@@ -667,19 +838,21 @@ async function handleMessage(
 		// Remove ack reaction and add success
 		try {
 			await withRetry(
-				() => app!.client.reactions.remove({
-					channel: context.channel,
-					timestamp: message.ts,
-					name: ackEmoji.replace(/:/g, ""),
-				}),
+				() =>
+					app!.client.reactions.remove({
+						channel: context.channel,
+						timestamp: message.ts,
+						name: ackEmoji.replace(/:/g, ""),
+					}),
 				retryOpts("reactions.remove:ack"),
 			);
 			await withRetry(
-				() => app!.client.reactions.add({
-					channel: context.channel,
-					timestamp: message.ts,
-					name: "white_check_mark",
-				}),
+				() =>
+					app!.client.reactions.add({
+						channel: context.channel,
+						timestamp: message.ts,
+						name: "white_check_mark",
+					}),
 				retryOpts("reactions.add:success"),
 			);
 		} catch (e) {}
@@ -690,11 +863,12 @@ async function handleMessage(
 		// Update message with error
 		try {
 			await withRetry(
-				() => app!.client.chat.update({
-					channel: streamState.channelId,
-					ts: streamState.messageTs,
-					text: "❌ Error processing your request. Please try again.",
-				}),
+				() =>
+					app!.client.chat.update({
+						channel: streamState.channelId,
+						ts: streamState.messageTs,
+						text: "❌ Error processing your request. Please try again.",
+					}),
 				retryOpts("chat.update:error"),
 			);
 		} catch (e) {}
@@ -702,19 +876,21 @@ async function handleMessage(
 		// Remove ack and add error reaction
 		try {
 			await withRetry(
-				() => app!.client.reactions.remove({
-					channel: context.channel,
-					timestamp: message.ts,
-					name: ackEmoji.replace(/:/g, ""),
-				}),
+				() =>
+					app!.client.reactions.remove({
+						channel: context.channel,
+						timestamp: message.ts,
+						name: ackEmoji.replace(/:/g, ""),
+					}),
 				retryOpts("reactions.remove:ack-error"),
 			);
 			await withRetry(
-				() => app!.client.reactions.add({
-					channel: context.channel,
-					timestamp: message.ts,
-					name: "x",
-				}),
+				() =>
+					app!.client.reactions.add({
+						channel: context.channel,
+						timestamp: message.ts,
+						name: "x",
+					}),
 				retryOpts("reactions.add:error"),
 			);
 		} catch (e) {}
@@ -740,11 +916,12 @@ async function updateMessage(
 
 	try {
 		await withRetry(
-			() => app!.client.chat.update({
-				channel: state.channelId,
-				ts: state.messageTs,
-				text,
-			}),
+			() =>
+				app!.client.chat.update({
+					channel: state.channelId,
+					ts: state.messageTs,
+					text,
+				}),
 			retryOpts("chat.update:stream"),
 		);
 		state.lastEdit = Date.now();
@@ -771,11 +948,12 @@ async function finalizeMessage(
 
 	try {
 		await withRetry(
-			() => app!.client.chat.update({
-				channel: state.channelId,
-				ts: state.messageTs,
-				text,
-			}),
+			() =>
+				app!.client.chat.update({
+					channel: state.channelId,
+					ts: state.messageTs,
+					text,
+				}),
 			retryOpts("chat.update:finalize"),
 		);
 	} catch (e) {
@@ -877,11 +1055,14 @@ const plugin: WOPRPlugin = {
 					}
 
 					try {
-						const response = await fetch("http://localhost:7437/plugins/slack/claim", {
-							method: "POST",
-							headers: { "Content-Type": "application/json" },
-							body: JSON.stringify({ code }),
-						});
+						const response = await fetch(
+							"http://localhost:7437/plugins/slack/claim",
+							{
+								method: "POST",
+								headers: { "Content-Type": "application/json" },
+								body: JSON.stringify({ code }),
+							},
+						);
 						const result = (await response.json()) as {
 							success?: boolean;
 							userId?: string;
@@ -894,17 +1075,23 @@ const plugin: WOPRPlugin = {
 							console.log(`  User: ${result.username} (${result.userId})`);
 							process.exit(0);
 						} else {
-							console.log(`Failed to claim: ${result.error || "Unknown error"}`);
+							console.log(
+								`Failed to claim: ${result.error || "Unknown error"}`,
+							);
 							process.exit(1);
 						}
 					} catch (_err) {
-						console.log("Error: Could not connect to WOPR daemon. Is it running?");
+						console.log(
+							"Error: Could not connect to WOPR daemon. Is it running?",
+						);
 						console.log("  Start it with: wopr daemon start");
 						process.exit(1);
 					}
 				} else {
 					console.log("Slack plugin commands:");
-					console.log("  wopr slack claim <code>  - Claim a pairing code to approve your Slack account");
+					console.log(
+						"  wopr slack claim <code>  - Claim a pairing code to approve your Slack account",
+					);
 					process.exit(subcommand ? 1 : 0);
 				}
 			},
@@ -958,9 +1145,15 @@ const plugin: WOPRPlugin = {
 		// `retry` object. Merge both so either config source works.
 		const rawConfig = config as Record<string, unknown>;
 		const flatRetry: RetryConfig = {
-			...(rawConfig.retryMaxRetries != null && { maxRetries: Number(rawConfig.retryMaxRetries) }),
-			...(rawConfig.retryBaseDelay != null && { baseDelay: Number(rawConfig.retryBaseDelay) }),
-			...(rawConfig.retryMaxDelay != null && { maxDelay: Number(rawConfig.retryMaxDelay) }),
+			...(rawConfig.retryMaxRetries != null && {
+				maxRetries: Number(rawConfig.retryMaxRetries),
+			}),
+			...(rawConfig.retryBaseDelay != null && {
+				baseDelay: Number(rawConfig.retryBaseDelay),
+			}),
+			...(rawConfig.retryMaxDelay != null && {
+				maxDelay: Number(rawConfig.retryMaxDelay),
+			}),
 		};
 		retryConfig = { ...flatRetry, ...config.retry };
 
@@ -987,11 +1180,18 @@ const plugin: WOPRPlugin = {
 			);
 			const botUserId = authTest.user_id;
 			botUsername = (authTest.user as string) || "";
+			storedBotToken = config.botToken || "";
 
 			// Message handler
 			app.message(async ({ message, context, say }) => {
-				// Skip messages without text or subtyped messages (like edits)
-				if (!("text" in message) || !message.text) return;
+				const hasText = "text" in message && !!message.text;
+				const hasFiles =
+					"files" in message &&
+					Array.isArray((message as any).files) &&
+					(message as any).files.length > 0;
+
+				// Skip messages with neither text nor files
+				if (!hasText && !hasFiles) return;
 
 				// Add bot user ID to context
 				(context as any).botUserId = botUserId;

@@ -108,11 +108,16 @@ export function registerSlackTools(
 		description: "List connected Slack workspaces.",
 		parameters: {},
 		handler: async (_params: Record<string, unknown>, auth: AuthContext) => {
-			return daemonRequest(
+			const health = (await daemonRequest(
 				apiBase,
 				`/plugins/${encodeURIComponent("wopr-plugin-slack")}/health`,
 				auth,
-			);
+			)) as Record<string, unknown>;
+			// Extract workspace-specific data from health response
+			return {
+				workspaces: health.workspaces ?? health.teams ?? [],
+				connected: health.connected ?? health.ok ?? false,
+			};
 		},
 	});
 

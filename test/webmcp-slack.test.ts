@@ -113,11 +113,13 @@ describe("registerSlackTools", () => {
 	});
 
 	describe("listWorkspaces", () => {
-		it("should GET /plugins/wopr-plugin-slack/health", async () => {
+		it("should GET /plugins/wopr-plugin-slack/health and extract workspace data", async () => {
 			const response = {
 				name: "wopr-plugin-slack",
 				installed: true,
 				loaded: true,
+				connected: true,
+				workspaces: [{ id: "T123", name: "test-ws" }],
 			};
 			mockFetch.mockResolvedValue(mockJsonResponse(response));
 			registerSlackTools(registry, API_BASE);
@@ -129,7 +131,10 @@ describe("registerSlackTools", () => {
 				"/api/plugins/wopr-plugin-slack/health",
 				expect.any(Object),
 			);
-			expect(result).toEqual(response);
+			expect(result).toEqual({
+				workspaces: [{ id: "T123", name: "test-ws" }],
+				connected: true,
+			});
 		});
 
 		it("should include bearer token in auth header", async () => {

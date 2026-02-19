@@ -8,7 +8,11 @@
 
 import type { App } from "@slack/bolt";
 import { isUserAllowed } from "./pairing.js";
-import type { ProviderInfo, StreamMessage, WOPRPluginContext } from "./types.js";
+import type {
+	ProviderInfo,
+	StreamMessage,
+	WOPRPluginContext,
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Session state (mirrors Discord plugin's per-session config)
@@ -411,7 +415,11 @@ export function registerSlashCommands(
 		const maybeSetProvider = ctxRecord["setSessionProvider"];
 		const setProvider =
 			typeof maybeSetProvider === "function"
-				? (maybeSetProvider as (session: string, provider: string, options?: { model?: string }) => Promise<void>)
+				? (maybeSetProvider as (
+						session: string,
+						provider: string,
+						options?: { model?: string },
+					) => Promise<void>)
 				: undefined;
 		if (setProvider) {
 			try {

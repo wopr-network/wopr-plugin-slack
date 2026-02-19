@@ -12,8 +12,8 @@ importers:
         specifier: ^4.6.0
         version: 4.6.0(@types/express@5.0.6)
       '@wopr-network/plugin-types':
-        specifier: github:wopr-network/wopr-plugin-types
-        version: https://codeload.github.com/wopr-network/wopr-plugin-types/tar.gz/d0598d7ea1efc0db61a0e040f111c36ec19a013a(zod@3.25.76)
+        specifier: ^0.2.0
+        version: 0.2.1(zod@3.25.76)
       winston:
         specifier: ^3.11.0
         version: 3.19.0
@@ -495,9 +495,8 @@ packages:
   '@vitest/utils@4.0.18':
     resolution: {integrity: sha512-msMRKLMVLWygpK3u2Hybgi4MNjcYJvwTb0Ru09+fOyCXIgT5raYP041DRRdiJiI3k/2U6SEbAETB3YtBrUkCFA==}
 
-  '@wopr-network/plugin-types@https://codeload.github.com/wopr-network/wopr-plugin-types/tar.gz/d0598d7ea1efc0db61a0e040f111c36ec19a013a':
-    resolution: {tarball: https://codeload.github.com/wopr-network/wopr-plugin-types/tar.gz/d0598d7ea1efc0db61a0e040f111c36ec19a013a}
-    version: 0.2.1
+  '@wopr-network/plugin-types@0.2.1':
+    resolution: {integrity: sha512-k9NC3RdVQrVtNIoEuoiP7S8i2/+9s46+YWX0BjDRmRRkZqcWnkpJ+H0ryEQZ0YfnTUfRdB+ZcteR0McduS3p+g==}
     peerDependencies:
       zod: ^3.23.0
 
@@ -1537,7 +1536,7 @@ snapshots:
       '@vitest/pretty-format': 4.0.18
       tinyrainbow: 3.0.3
 
-  '@wopr-network/plugin-types@https://codeload.github.com/wopr-network/wopr-plugin-types/tar.gz/d0598d7ea1efc0db61a0e040f111c36ec19a013a(zod@3.25.76)':
+  '@wopr-network/plugin-types@0.2.1(zod@3.25.76)':
     dependencies:
       zod: 3.25.76
 

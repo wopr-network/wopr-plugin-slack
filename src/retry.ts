@@ -28,7 +28,10 @@ function isRateLimitError(error: unknown): { retryAfter?: number } | null {
 	// Slack WebClient rate limit errors have code 'slack_webapi_rate_limited_error'
 	// and include a retryAfter field (seconds)
 	if (err.code === "slack_webapi_rate_limited_error") {
-		return { retryAfter: typeof err.retryAfter === "number" ? err.retryAfter : undefined };
+		return {
+			retryAfter:
+				typeof err.retryAfter === "number" ? err.retryAfter : undefined,
+		};
 	}
 
 	// Also check for HTTP 429 status on generic errors

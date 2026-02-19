@@ -25,7 +25,6 @@ import {
 	isUserAllowed,
 } from "./pairing.js";
 import { withRetry } from "./retry.js";
-import { startTyping, stopTyping, stopAllTyping } from "./typing.js";
 import type {
 	AgentIdentity,
 	ChannelCommand,
@@ -40,6 +39,7 @@ import type {
 	WOPRPlugin,
 	WOPRPluginContext,
 } from "./types.js";
+import { startTyping, stopAllTyping, stopTyping } from "./typing.js";
 
 const logger = winston.createLogger({
 	level: "debug",

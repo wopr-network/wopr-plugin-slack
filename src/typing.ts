@@ -20,7 +20,11 @@ const TYPING_FRAMES = ["_Thinking._", "_Thinking.._", "_Thinking..._"];
 
 export interface TypingIndicatorDeps {
 	/** Update an existing Slack message */
-	chatUpdate(params: { channel: string; ts: string; text: string }): Promise<unknown>;
+	chatUpdate(params: {
+		channel: string;
+		ts: string;
+		text: string;
+	}): Promise<unknown>;
 	/** Retry options for API calls */
 	retryOpts: RetryOptions;
 	/** Logger */
@@ -72,7 +76,11 @@ export function startTyping(
 
 		// Stop if idle for too long
 		if (idleTime > TYPING_IDLE_TIMEOUT_MS) {
-			deps.logger.debug({ msg: "Typing indicator stopped (idle)", key, idleTime });
+			deps.logger.debug({
+				msg: "Typing indicator stopped (idle)",
+				key,
+				idleTime,
+			});
 			stopTyping(key);
 			return;
 		}
@@ -83,7 +91,12 @@ export function startTyping(
 
 		try {
 			await withRetry(
-				() => deps.chatUpdate({ channel: state.channelId, ts: state.messageTs, text }),
+				() =>
+					deps.chatUpdate({
+						channel: state.channelId,
+						ts: state.messageTs,
+						text,
+					}),
 				deps.retryOpts,
 			);
 		} catch (_e) {

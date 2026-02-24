@@ -5,41 +5,32 @@
  * Uses @slack/bolt for robust event handling.
  */
 
-import crypto from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { App, FileInstallationStore, LogLevel } from "@slack/bolt";
+import type { App } from "@slack/bolt";
 import winston from "winston";
-import {
-	getEffectiveSessionKey,
-	incrementMessageCount,
-	registerSlashCommands,
-} from "./commands.js";
+import { initSlackApp } from "./app-init.js";
+import { registerSlashCommands } from "./commands.js";
+import { handleMessage, type MessageHandlerDeps } from "./message-handler.js";
 import {
 	approveUser,
-	buildPairingMessage,
-	checkRequestRateLimit,
 	claimPairingCode,
 	cleanupExpiredPairings,
-	createPairingRequest,
-	isUserAllowed,
 } from "./pairing.js";
 import { withRetry } from "./retry.js";
 import type {
 	AgentIdentity,
 	ChannelCommand,
-	ChannelCommandContext,
-	ChannelMessageContext,
 	ChannelMessageParser,
 	ChannelProvider,
 	ConfigSchema,
 	RetryConfig,
 	SlackConfig,
-	StreamMessage,
 	WOPRPlugin,
 	WOPRPluginContext,
 } from "./types.js";
-import { startTyping, stopAllTyping, stopTyping } from "./typing.js";
+import { stopAllTyping } from "./typing.js";
+
+export { saveAttachments } from "./attachments.js";
 
 const logger = winston.createLogger({
 	level: "debug",
@@ -98,18 +89,6 @@ function retryOpts(label: string) {
 		},
 	};
 }
-
-// Track active streaming sessions
-interface StreamState {
-	channelId: string;
-	threadTs?: string;
-	messageTs: string;
-	buffer: string;
-	lastEdit: number;
-	isFinalized: boolean;
-}
-
-const activeStreams = new Map<string, StreamState>();
 
 // ============================================================================
 // Channel Provider (cross-plugin command/parser registration)
@@ -358,101 +337,6 @@ const configSchema: ConfigSchema = {
 
 // Discord limit is 2000, Slack is 4000
 const SLACK_LIMIT = 4000;
-const EDIT_THRESHOLD = 1500; // Edit after 1500 new chars
-const IDLE_SPLIT_MS = 1000; // New message after 1s idle
-
-// Attachments directory (same convention as Discord plugin)
-const ATTACHMENTS_DIR = existsSync("/data")
-	? "/data/attachments"
-	: path.join(process.env.WOPR_HOME || "/tmp/wopr-test", "data", "attachments");
-
-/** Slack file object shape (subset of fields we use) */
-interface SlackFile {
-	id: string;
-	name?: string;
-	url_private_download?: string;
-	url_private?: string;
-	size?: number;
-	mimetype?: string;
-}
-
-/**
- * Download Slack file attachments to disk.
- * Slack files require the bot token in the Authorization header.
- * Returns an array of saved file paths.
- */
-export async function saveAttachments(
-	files: SlackFile[],
-	userId: string,
-	botToken: string,
-): Promise<string[]> {
-	if (!files || files.length === 0) return [];
-
-	try {
-		if (!existsSync(ATTACHMENTS_DIR)) {
-			mkdirSync(ATTACHMENTS_DIR, { recursive: true });
-		}
-	} catch (err) {
-		logger.error({
-			msg: "Failed to create attachments directory",
-			dir: ATTACHMENTS_DIR,
-			error: String(err),
-		});
-		return [];
-	}
-
-	const savedPaths: string[] = [];
-
-	for (const file of files) {
-		const downloadUrl = file.url_private_download || file.url_private;
-		if (!downloadUrl) {
-			logger.warn({ msg: "Slack file has no download URL", fileId: file.id });
-			continue;
-		}
-
-		try {
-			const timestamp = Date.now();
-			const safeName =
-				file.name?.replace(/[^a-zA-Z0-9._-]/g, "_") || "attachment";
-			const filename = `${timestamp}-${userId}-${safeName}`;
-			const filepath = path.join(ATTACHMENTS_DIR, filename);
-
-			const response = await fetch(downloadUrl, {
-				headers: { Authorization: `Bearer ${botToken}` },
-			});
-
-			if (!response.ok) {
-				logger.warn({
-					msg: "Failed to download Slack file",
-					fileId: file.id,
-					url: downloadUrl,
-					status: response.status,
-				});
-				continue;
-			}
-
-			const arrayBuf = await response.arrayBuffer();
-			writeFileSync(filepath, Buffer.from(arrayBuf));
-
-			savedPaths.push(filepath);
-			logger.info({
-				msg: "Slack attachment saved",
-				filename,
-				size: file.size,
-				mimetype: file.mimetype,
-			});
-		} catch (err) {
-			logger.error({
-				msg: "Error saving Slack attachment",
-				fileId: file.id,
-				name: file.name,
-				error: String(err),
-			});
-		}
-	}
-
-	return savedPaths;
-}
 
 /**
  * Refresh agent identity from workspace
@@ -467,569 +351,6 @@ async function refreshIdentity() {
 		}
 	} catch (e) {
 		logger.warn({ msg: "Failed to refresh identity", error: String(e) });
-	}
-}
-
-/**
- * Get the reaction emoji (from identity or default)
- */
-function getAckReaction(config: SlackConfig): string {
-	return config.ackReaction?.trim() || agentIdentity.emoji?.trim() || "👀";
-}
-
-/**
- * Determine if we should respond to this message
- */
-async function shouldRespond(
-	message: any,
-	context: any,
-	config: SlackConfig,
-): Promise<boolean> {
-	// Ignore bot messages
-	if (message.subtype === "bot_message" || message.bot_id) {
-		return false;
-	}
-
-	// Ignore message_changed (edits)
-	if (message.subtype === "message_changed") {
-		return false;
-	}
-
-	const isDM = context.channel?.startsWith("D") || false;
-
-	// DM handling
-	if (isDM) {
-		if (config.dm?.enabled === false) return false;
-
-		const policy = config.dm?.policy || "pairing";
-		if (policy === "closed") return false;
-		if (policy === "open") return true;
-
-		// Pairing mode - check if user is already approved
-		if (ctx && isUserAllowed(ctx, message.user)) return true;
-
-		// Check if this is a claim attempt (user typing a pairing code)
-		const trimmed = (message.text || "").trim().toUpperCase();
-		if (/^[A-Z2-9]{8}$/.test(trimmed)) {
-			// Looks like a pairing code — try to claim it
-			const { request, error } = claimPairingCode(
-				trimmed,
-				message.user,
-				message.user,
-			);
-			if (request && ctx) {
-				try {
-					await approveUser(ctx, request.slackUserId);
-				} catch (e) {
-					logger.error({
-						msg: "Failed to approve user after pairing claim",
-						user: message.user,
-						error: String(e),
-					});
-				}
-				logger.info({ msg: "Pairing claimed via DM", user: message.user });
-				// Send confirmation — we'll respond via the say callback if available
-				// Store the approval message in a special field so handleMessage can send it
-				(message as any).__pairingApproved = true;
-				return true;
-			}
-			// If it failed, fall through to the pairing prompt below
-			if (error) {
-				logger.debug({
-					msg: "Pairing claim failed",
-					user: message.user,
-					error,
-				});
-			}
-		}
-
-		// Rate-limit pairing requests
-		if (!checkRequestRateLimit(message.user)) {
-			logger.info({ msg: "Pairing request rate-limited", user: message.user });
-			return false;
-		}
-
-		// Generate pairing code and send it to the user
-		const username =
-			message.user_profile?.display_name || message.user || "unknown";
-		const code = createPairingRequest(message.user, username);
-		const pairingMsg = buildPairingMessage(code);
-
-		logger.info({
-			msg: "Pairing code issued",
-			user: message.user,
-			code,
-		});
-
-		// Send the pairing message directly via the Slack API
-		try {
-			await withRetry(
-				() =>
-					app!.client.chat.postMessage({
-						channel: context.channel,
-						text: pairingMsg,
-					}),
-				retryOpts("chat.postMessage:pairing"),
-			);
-		} catch (e) {
-			logger.warn({ msg: "Failed to send pairing message", error: String(e) });
-		}
-
-		return false;
-	}
-
-	// Channel handling
-	const groupPolicy = config.groupPolicy || "allowlist";
-	if (groupPolicy === "disabled") return false;
-	if (groupPolicy === "open") {
-		// In open mode, only respond to mentions
-		return message.text?.includes(`<@${context.botUserId}>`) || false;
-	}
-
-	// Allowlist mode
-	const channelConfig = config.channels?.[context.channel];
-	if (
-		!channelConfig ||
-		channelConfig.enabled === false ||
-		channelConfig.allow === false
-	) {
-		return false;
-	}
-
-	// Check if mention required
-	if (channelConfig.requireMention) {
-		return message.text?.includes(`<@${context.botUserId}>`) || false;
-	}
-
-	return true;
-}
-
-/**
- * Handle incoming Slack message
- */
-async function handleMessage(
-	message: any,
-	context: any,
-	say: any,
-	config: SlackConfig,
-) {
-	logger.debug({
-		msg: "RECEIVED MESSAGE",
-		text: message.text?.substring(0, 100),
-		user: message.user,
-		channel: context.channel,
-		isDM: context.channel?.startsWith("D"),
-	});
-
-	if (!ctx) return;
-
-	const isDM = context.channel?.startsWith("D") || false;
-
-	// Check if we should respond
-	if (!(await shouldRespond(message, context, config))) {
-		// Still log to session for context
-		const sessionKey = getEffectiveSessionKey(
-			context.channel,
-			message.user,
-			isDM,
-		);
-		try {
-			ctx.logMessage(sessionKey, message.text, {
-				from: message.user,
-				channel: { type: "slack", id: context.channel },
-			});
-		} catch (e) {}
-		return;
-	}
-
-	// If user was just approved via pairing, send confirmation and return early
-	// so the original code string doesn't get processed as regular input
-	if ((message as any).__pairingApproved) {
-		try {
-			await say({
-				text: "Your account has been paired. I'll respond to your messages from now on.",
-			});
-		} catch (e) {
-			logger.warn({
-				msg: "Failed to send pairing confirmation",
-				error: String(e),
-			});
-		}
-		return;
-	}
-
-	// Add ack reaction
-	const ackEmoji = getAckReaction(config);
-	try {
-		await withRetry(
-			() =>
-				app!.client.reactions.add({
-					channel: context.channel,
-					timestamp: message.ts,
-					name: ackEmoji.replace(/:/g, ""), // Remove colons if present
-				}),
-			retryOpts("reactions.add:ack"),
-		);
-	} catch (e) {
-		logger.warn({ msg: "Failed to add reaction", error: String(e) });
-	}
-
-	const sessionKey = getEffectiveSessionKey(
-		context.channel,
-		message.user,
-		isDM,
-	);
-	incrementMessageCount(sessionKey);
-
-	// Determine reply threading
-	const replyToMode = config.replyToMode || "off";
-	const shouldThread =
-		replyToMode === "all" ||
-		(replyToMode === "first" && message.thread_ts) ||
-		message.thread_ts;
-
-	// Create stream state
-	const streamState: StreamState = {
-		channelId: context.channel,
-		threadTs: shouldThread ? message.thread_ts || message.ts : undefined,
-		messageTs: "", // Will be set on first send
-		buffer: "",
-		lastEdit: 0,
-		isFinalized: false,
-	};
-
-	activeStreams.set(sessionKey, streamState);
-
-	try {
-		// Send initial message
-		const initialResponse = await say({
-			text: "_Thinking..._",
-			thread_ts: streamState.threadTs,
-		});
-
-		streamState.messageTs = initialResponse.ts;
-
-		// Start typing indicator (animates the placeholder until content arrives)
-		startTyping(sessionKey, context.channel, streamState.messageTs, {
-			chatUpdate: (params) => app!.client.chat.update(params),
-			retryOpts: retryOpts("chat.update:typing"),
-			logger,
-		});
-
-		// Stream handling
-		let buffer = "";
-		let lastFlush = Date.now();
-		let finalizeTimer: NodeJS.Timeout | null = null;
-
-		const handleChunk = async (msg: StreamMessage) => {
-			if (streamState.isFinalized) return;
-
-			let textContent = "";
-			if (msg.type === "text" && msg.content) {
-				textContent = msg.content;
-			} else if (
-				(msg.type as string) === "assistant" &&
-				(msg as any).message?.content
-			) {
-				const content = (msg as any).message.content;
-				if (Array.isArray(content)) {
-					textContent = content.map((c: any) => c.text || "").join("");
-				} else if (typeof content === "string") {
-					textContent = content;
-				}
-			}
-
-			if (!textContent) return;
-
-			// Stop typing animation once real content starts flowing
-			stopTyping(sessionKey);
-
-			buffer += textContent;
-			const now = Date.now();
-
-			// Check for idle gap
-			if (now - lastFlush > IDLE_SPLIT_MS && buffer.length > 0) {
-				// Finalize current and start new
-				await updateMessage(streamState, buffer);
-				buffer = "";
-			}
-
-			lastFlush = now;
-
-			// Update message if we have enough content
-			if (buffer.length >= EDIT_THRESHOLD) {
-				await updateMessage(streamState, buffer);
-			}
-
-			// Reset finalize timer
-			if (finalizeTimer) clearTimeout(finalizeTimer);
-			finalizeTimer = setTimeout(async () => {
-				if (buffer.length > 0 && !streamState.isFinalized) {
-					await finalizeMessage(streamState, buffer);
-				}
-			}, 2000);
-		};
-
-		// Handle file attachments
-		let messageContent: string = message.text || "";
-		const effectiveBotToken = context.botToken || storedBotToken;
-		if (
-			message.files &&
-			Array.isArray(message.files) &&
-			message.files.length > 0 &&
-			effectiveBotToken
-		) {
-			const attachmentPaths = await saveAttachments(
-				message.files as SlackFile[],
-				message.user,
-				effectiveBotToken,
-			);
-			if (attachmentPaths.length > 0) {
-				const attachmentInfo = attachmentPaths
-					.map((p: string) => `[Attachment: ${p}]`)
-					.join("\n");
-				messageContent = messageContent
-					? `${messageContent}\n\n${attachmentInfo}`
-					: attachmentInfo;
-				logger.info({
-					msg: "Attachments appended to message",
-					count: attachmentPaths.length,
-					channel: context.channel,
-				});
-			}
-		}
-
-		// Skip injection if content is empty (e.g., file-only message where all downloads failed)
-		if (!messageContent.trim()) {
-			logger.warn({
-				msg: "Skipping inject — message content is empty after attachment handling",
-				user: message.user,
-				channel: context.channel,
-			});
-			// Clean up the "Thinking..." placeholder
-			try {
-				await withRetry(
-					() =>
-						app!.client.chat.delete({
-							channel: streamState.channelId,
-							ts: streamState.messageTs,
-						}),
-					retryOpts("chat.delete:empty"),
-				);
-			} catch (_e) {}
-			return;
-		}
-
-		// Inject to WOPR
-		const response = await ctx.inject(sessionKey, messageContent, {
-			from: message.user,
-			channel: { type: "slack", id: context.channel },
-			onStream: handleChunk,
-		});
-
-		// Finalize — stop typing indicator before final message update
-		stopTyping(sessionKey);
-		if (finalizeTimer) clearTimeout(finalizeTimer);
-		if (!streamState.isFinalized) {
-			const finalText = buffer || response;
-			await finalizeMessage(streamState, finalText);
-		}
-
-		// Remove ack reaction and add success
-		try {
-			await withRetry(
-				() =>
-					app!.client.reactions.remove({
-						channel: context.channel,
-						timestamp: message.ts,
-						name: ackEmoji.replace(/:/g, ""),
-					}),
-				retryOpts("reactions.remove:ack"),
-			);
-			await withRetry(
-				() =>
-					app!.client.reactions.add({
-						channel: context.channel,
-						timestamp: message.ts,
-						name: "white_check_mark",
-					}),
-				retryOpts("reactions.add:success"),
-			);
-		} catch (e) {}
-	} catch (error: any) {
-		stopTyping(sessionKey);
-		logger.error({ msg: "Inject failed", error: String(error) });
-
-		// Update message with error
-		try {
-			await withRetry(
-				() =>
-					app!.client.chat.update({
-						channel: streamState.channelId,
-						ts: streamState.messageTs,
-						text: "❌ Error processing your request. Please try again.",
-					}),
-				retryOpts("chat.update:error"),
-			);
-		} catch (e) {}
-
-		// Remove ack and add error reaction
-		try {
-			await withRetry(
-				() =>
-					app!.client.reactions.remove({
-						channel: context.channel,
-						timestamp: message.ts,
-						name: ackEmoji.replace(/:/g, ""),
-					}),
-				retryOpts("reactions.remove:ack-error"),
-			);
-			await withRetry(
-				() =>
-					app!.client.reactions.add({
-						channel: context.channel,
-						timestamp: message.ts,
-						name: "x",
-					}),
-				retryOpts("reactions.add:error"),
-			);
-		} catch (e) {}
-	} finally {
-		activeStreams.delete(sessionKey);
-	}
-}
-
-/**
- * Update a Slack message with new content
- */
-async function updateMessage(
-	state: StreamState,
-	content: string,
-): Promise<void> {
-	if (!app || state.isFinalized) return;
-
-	// Chunk if over limit
-	let text = content;
-	if (text.length > SLACK_LIMIT) {
-		text = text.substring(0, SLACK_LIMIT - 3) + "...";
-	}
-
-	try {
-		await withRetry(
-			() =>
-				app!.client.chat.update({
-					channel: state.channelId,
-					ts: state.messageTs,
-					text,
-				}),
-			retryOpts("chat.update:stream"),
-		);
-		state.lastEdit = Date.now();
-	} catch (e) {
-		logger.warn({ msg: "Failed to update message", error: String(e) });
-	}
-}
-
-/**
- * Finalize a Slack message
- */
-async function finalizeMessage(
-	state: StreamState,
-	content: string,
-): Promise<void> {
-	if (!app || state.isFinalized) return;
-	state.isFinalized = true;
-
-	// Chunk if over limit
-	let text = content;
-	if (text.length > SLACK_LIMIT) {
-		text = text.substring(0, SLACK_LIMIT - 3) + "...";
-	}
-
-	try {
-		await withRetry(
-			() =>
-				app!.client.chat.update({
-					channel: state.channelId,
-					ts: state.messageTs,
-					text,
-				}),
-			retryOpts("chat.update:finalize"),
-		);
-	} catch (e) {
-		logger.warn({ msg: "Failed to finalize message", error: String(e) });
-	}
-}
-
-/**
- * Build OAuth / token rotation options when credentials are provided.
- * Bolt 4 uses these to auto-refresh granular bot tokens (90-day expiry).
- */
-function buildOAuthOptions(config: SlackConfig) {
-	if (!config.clientId || !config.clientSecret) return {};
-
-	const installDir = path.join(
-		process.env.WOPR_HOME || "/tmp/wopr-test",
-		"data",
-		"slack-installations",
-	);
-
-	let stateSecret = config.stateSecret;
-	if (!stateSecret) {
-		stateSecret = crypto.randomBytes(32).toString("hex");
-		logger.warn(
-			"No stateSecret configured for OAuth. Generated a random one — it will not persist across restarts. Set SLACK_STATE_SECRET or config.channels.slack.stateSecret for stable CSRF protection.",
-		);
-	}
-
-	return {
-		clientId: config.clientId,
-		clientSecret: config.clientSecret,
-		stateSecret,
-		installationStore: new FileInstallationStore({
-			baseDir: installDir,
-		}),
-		tokenVerificationEnabled: true,
-	};
-}
-
-/**
- * Initialize the Slack app
- */
-async function initSlackApp(config: SlackConfig): Promise<App> {
-	const mode = config.mode || "socket";
-	const oauthOpts = buildOAuthOptions(config);
-	const hasOAuth = "installationStore" in oauthOpts;
-
-	if (mode === "socket") {
-		if (!config.appToken) {
-			throw new Error(
-				"App Token required for Socket Mode. Set channels.slack.appToken",
-			);
-		}
-
-		return new App({
-			...(hasOAuth ? {} : { token: config.botToken }),
-			appToken: config.appToken,
-			socketMode: true,
-			logLevel: LogLevel.INFO,
-			...oauthOpts,
-		});
-	} else {
-		// HTTP mode
-		if (!config.signingSecret) {
-			throw new Error(
-				"Signing Secret required for HTTP mode. Set channels.slack.signingSecret",
-			);
-		}
-
-		return new App({
-			...(hasOAuth ? {} : { token: config.botToken }),
-			signingSecret: config.signingSecret,
-			endpoints: config.webhookPath || "/slack/events",
-			logLevel: LogLevel.INFO,
-			...oauthOpts,
-		});
 	}
 }
 
@@ -1171,7 +492,7 @@ const plugin: WOPRPlugin = {
 
 		// Initialize Slack app
 		try {
-			app = await initSlackApp(config);
+			app = await initSlackApp(config, logger);
 
 			// Store bot user ID for mention detection
 			const authTest = await withRetry(
@@ -1181,6 +502,16 @@ const plugin: WOPRPlugin = {
 			const botUserId = authTest.user_id;
 			botUsername = (authTest.user as string) || "";
 			storedBotToken = config.botToken || "";
+
+			// Build deps for message handler (getters to avoid circular refs)
+			const msgDeps: MessageHandlerDeps = {
+				getApp: () => app,
+				getCtx: () => ctx,
+				getStoredBotToken: () => storedBotToken,
+				retryOpts,
+				logger,
+				agentIdentity,
+			};
 
 			// Message handler
 			app.message(async ({ message, context, say }) => {
@@ -1196,7 +527,7 @@ const plugin: WOPRPlugin = {
 				// Add bot user ID to context
 				(context as any).botUserId = botUserId;
 
-				await handleMessage(message as any, context, say, config);
+				await handleMessage(message as any, context, say, config, msgDeps);
 			});
 
 			// App mention handler
@@ -1206,6 +537,7 @@ const plugin: WOPRPlugin = {
 					{ ...context, channel: event.channel },
 					say,
 					config,
+					msgDeps,
 				);
 			});
 

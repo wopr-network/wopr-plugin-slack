@@ -27,7 +27,8 @@ import type {
 import { startTyping, stopTyping } from "./typing.js";
 
 // Constants
-const SLACK_LIMIT = 4000;
+/** Maximum characters Slack accepts per message (chat.update / chat.postMessage) */
+export const SLACK_LIMIT = 4000;
 const EDIT_THRESHOLD = 1500;
 const IDLE_SPLIT_MS = 1000;
 
@@ -66,7 +67,7 @@ async function updateMessage(
 
 	let text = content;
 	if (text.length > SLACK_LIMIT) {
-		text = text.substring(0, SLACK_LIMIT - 3) + "...";
+		text = `${text.substring(0, SLACK_LIMIT - 3)}...`;
 	}
 
 	try {
@@ -99,7 +100,7 @@ async function finalizeMessage(
 
 	let text = content;
 	if (text.length > SLACK_LIMIT) {
-		text = text.substring(0, SLACK_LIMIT - 3) + "...";
+		text = `${text.substring(0, SLACK_LIMIT - 3)}...`;
 	}
 
 	try {
@@ -174,16 +175,17 @@ export async function shouldRespond(
 			if (request && ctx) {
 				try {
 					await approveUser(ctx, request.slackUserId);
+					logger.info({ msg: "Pairing claimed via DM", user: message.user });
+					(message as any).__pairingApproved = true;
+					return true;
 				} catch (e) {
 					logger.error({
 						msg: "Failed to approve user after pairing claim",
 						user: message.user,
 						error: String(e),
 					});
+					return false;
 				}
-				logger.info({ msg: "Pairing claimed via DM", user: message.user });
-				(message as any).__pairingApproved = true;
-				return true;
 			}
 			if (error) {
 				logger.debug({
@@ -210,6 +212,7 @@ export async function shouldRespond(
 
 		try {
 			await withRetry(
+				// biome-ignore lint/style/noNonNullAssertion: app is checked non-null above via getApp()
 				() =>
 					app!.client.chat.postMessage({
 						channel: context.channel,
@@ -316,6 +319,7 @@ export async function handleMessage(
 	const ackEmoji = getAckReaction(config, agentIdentity);
 	try {
 		await withRetry(
+			// biome-ignore lint/style/noNonNullAssertion: app non-null guaranteed by handleMessage entry guard
 			() =>
 				app!.client.reactions.add({
 					channel: context.channel,
@@ -362,6 +366,7 @@ export async function handleMessage(
 		streamState.messageTs = initialResponse.ts;
 
 		startTyping(sessionKey, context.channel, streamState.messageTs, {
+			// biome-ignore lint/style/noNonNullAssertion: app non-null guaranteed by handleMessage entry guard
 			chatUpdate: (params) => app!.client.chat.update(params),
 			retryOpts: retryOpts("chat.update:typing"),
 			logger,

@@ -29,11 +29,18 @@ const ATTACHMENTS_DIR = existsSync("/data")
  * Slack files require the bot token in the Authorization header.
  * Returns an array of saved file paths.
  */
+const noopLogger: Logger = {
+	error: () => {},
+	warn: () => {},
+	info: () => {},
+	debug: () => {},
+} as unknown as Logger;
+
 export async function saveAttachments(
 	files: SlackFile[],
 	userId: string,
 	botToken: string,
-	logger: Logger,
+	logger: Logger = noopLogger,
 ): Promise<string[]> {
 	if (!files || files.length === 0) return [];
 

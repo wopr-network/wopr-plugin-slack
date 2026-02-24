@@ -10,7 +10,11 @@ import type { App } from "@slack/bolt";
 import winston from "winston";
 import { initSlackApp } from "./app-init.js";
 import { registerSlashCommands } from "./commands.js";
-import { handleMessage, type MessageHandlerDeps } from "./message-handler.js";
+import {
+	handleMessage,
+	type MessageHandlerDeps,
+	SLACK_LIMIT,
+} from "./message-handler.js";
 import {
 	approveUser,
 	claimPairingCode,
@@ -334,9 +338,6 @@ const configSchema: ConfigSchema = {
 		},
 	],
 };
-
-// Discord limit is 2000, Slack is 4000
-const SLACK_LIMIT = 4000;
 
 /**
  * Refresh agent identity from workspace

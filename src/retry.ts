@@ -35,12 +35,13 @@ function isRateLimitError(error: unknown): { retryAfter?: number } | null {
 	}
 
 	// Also check for HTTP 429 status on generic errors
-	if (err.statusCode === 429 || (err as any).status === 429) {
+	if (err.statusCode === 429 || err.status === 429) {
+		const headers = err.headers as Record<string, string> | undefined;
 		const retryAfter =
 			typeof err.retryAfter === "number"
 				? err.retryAfter
-				: typeof (err as any).headers?.["retry-after"] === "string"
-					? Number.parseInt((err as any).headers["retry-after"], 10)
+				: typeof headers?.["retry-after"] === "string"
+					? Number.parseInt(headers["retry-after"], 10)
 					: undefined;
 		return { retryAfter: Number.isNaN(retryAfter) ? undefined : retryAfter };
 	}

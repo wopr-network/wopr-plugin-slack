@@ -412,7 +412,7 @@ export function registerSlashCommands(
 		const state = getSessionState(sessionKey);
 
 		const ctxRecord = ctx as unknown as Record<string, unknown>;
-		const maybeSetProvider = ctxRecord["setSessionProvider"];
+		const maybeSetProvider = ctxRecord.setSessionProvider;
 		const setProvider =
 			typeof maybeSetProvider === "function"
 				? (maybeSetProvider as (

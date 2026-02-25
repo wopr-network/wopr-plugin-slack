@@ -5,7 +5,7 @@
  * and streaming message update/finalize helpers.
  */
 
-import type { App } from "@slack/bolt";
+import type { App, Context, SayFn } from "@slack/bolt";
 import type { Logger } from "winston";
 import { type SlackFile, saveAttachments } from "./attachments.js";
 import { getEffectiveSessionKey, incrementMessageCount } from "./commands.js";
@@ -25,6 +25,21 @@ import type {
 	WOPRPluginContext,
 } from "./types.js";
 import { startTyping, stopTyping } from "./typing.js";
+
+/** Slack message shape as received by handlers */
+type SlackMessage = Record<string, unknown> & {
+	text?: string;
+	user?: string;
+	ts?: string;
+	subtype?: string;
+	bot_id?: string;
+	thread_ts?: string;
+	files?: unknown[];
+	user_profile?: { display_name?: string };
+};
+
+/** Bolt context extended with channel (added by Slack event middleware) */
+type SlackContext = Context & { channel?: string; botUserId?: string };
 
 // Constants
 const SLACK_LIMIT = 4000;
@@ -66,7 +81,7 @@ async function updateMessage(
 
 	let text = content;
 	if (text.length > SLACK_LIMIT) {
-		text = text.substring(0, SLACK_LIMIT - 3) + "...";
+		text = `${text.substring(0, SLACK_LIMIT - 3)}...`;
 	}
 
 	try {
@@ -99,7 +114,7 @@ async function finalizeMessage(
 
 	let text = content;
 	if (text.length > SLACK_LIMIT) {
-		text = text.substring(0, SLACK_LIMIT - 3) + "...";
+		text = `${text.substring(0, SLACK_LIMIT - 3)}...`;
 	}
 
 	try {
@@ -131,8 +146,8 @@ function getAckReaction(
  * Determine if we should respond to this message
  */
 export async function shouldRespond(
-	message: any,
-	context: any,
+	message: SlackMessage,
+	context: SlackContext,
 	config: SlackConfig,
 	deps: MessageHandlerDeps,
 ): Promise<boolean> {
@@ -161,7 +176,7 @@ export async function shouldRespond(
 		if (policy === "open") return true;
 
 		// Pairing mode - check if user is already approved
-		if (ctx && isUserAllowed(ctx, message.user)) return true;
+		if (ctx && isUserAllowed(ctx, message.user ?? "")) return true;
 
 		// Check if this is a claim attempt (user typing a pairing code)
 		const trimmed = (message.text || "").trim().toUpperCase();
@@ -182,7 +197,7 @@ export async function shouldRespond(
 					});
 				}
 				logger.info({ msg: "Pairing claimed via DM", user: message.user });
-				(message as any).__pairingApproved = true;
+				message.__pairingApproved = true;
 				return true;
 			}
 			if (error) {
@@ -195,7 +210,7 @@ export async function shouldRespond(
 		}
 
 		// Rate-limit pairing requests
-		if (!checkRequestRateLimit(message.user)) {
+		if (!checkRequestRateLimit(message.user ?? "")) {
 			logger.info({ msg: "Pairing request rate-limited", user: message.user });
 			return false;
 		}
@@ -203,20 +218,22 @@ export async function shouldRespond(
 		// Generate pairing code and send it to the user
 		const username =
 			message.user_profile?.display_name || message.user || "unknown";
-		const code = createPairingRequest(message.user, username);
+		const code = createPairingRequest(message.user ?? "", username);
 		const pairingMsg = buildPairingMessage(code);
 
 		logger.info({ msg: "Pairing code issued", user: message.user, code });
 
 		try {
-			await withRetry(
-				() =>
-					app!.client.chat.postMessage({
-						channel: context.channel,
-						text: pairingMsg,
-					}),
-				retryOpts("chat.postMessage:pairing"),
-			);
+			if (app) {
+				await withRetry(
+					() =>
+						app.client.chat.postMessage({
+							channel: context.channel ?? "",
+							text: pairingMsg,
+						}),
+					retryOpts("chat.postMessage:pairing"),
+				);
+			}
 		} catch (e) {
 			logger.warn({ msg: "Failed to send pairing message", error: String(e) });
 		}
@@ -232,7 +249,7 @@ export async function shouldRespond(
 	}
 
 	// Allowlist mode
-	const channelConfig = config.channels?.[context.channel];
+	const channelConfig = config.channels?.[context.channel ?? ""];
 	if (
 		!channelConfig ||
 		channelConfig.enabled === false ||
@@ -252,9 +269,9 @@ export async function shouldRespond(
  * Handle incoming Slack message
  */
 export async function handleMessage(
-	message: any,
-	context: any,
-	say: any,
+	message: SlackMessage,
+	context: SlackContext,
+	say: SayFn,
 	config: SlackConfig,
 	deps: MessageHandlerDeps,
 ) {
@@ -278,27 +295,32 @@ export async function handleMessage(
 	});
 
 	if (!ctx) return;
+	if (!app) return;
+	const slackApp = app;
 
-	const isDM = context.channel?.startsWith("D") || false;
+	const channelId = context.channel ?? "";
+	const messageTs = (message.ts as string | undefined) ?? "";
+
+	const isDM = channelId.startsWith("D");
 
 	// Check if we should respond
 	if (!(await shouldRespond(message, context, config, deps))) {
 		const sessionKey = getEffectiveSessionKey(
-			context.channel,
-			message.user,
+			channelId,
+			message.user ?? "",
 			isDM,
 		);
 		try {
-			ctx.logMessage(sessionKey, message.text, {
+			ctx.logMessage(sessionKey, message.text ?? "", {
 				from: message.user,
-				channel: { type: "slack", id: context.channel },
+				channel: { type: "slack", id: channelId },
 			});
 		} catch (_e) {}
 		return;
 	}
 
 	// If user was just approved via pairing, send confirmation and return early
-	if ((message as any).__pairingApproved) {
+	if (message.__pairingApproved) {
 		try {
 			await say({
 				text: "Your account has been paired. I'll respond to your messages from now on.",
@@ -317,9 +339,9 @@ export async function handleMessage(
 	try {
 		await withRetry(
 			() =>
-				app!.client.reactions.add({
-					channel: context.channel,
-					timestamp: message.ts,
+				slackApp.client.reactions.add({
+					channel: channelId,
+					timestamp: messageTs,
 					name: ackEmoji.replace(/:/g, ""),
 				}),
 			retryOpts("reactions.add:ack"),
@@ -329,8 +351,8 @@ export async function handleMessage(
 	}
 
 	const sessionKey = getEffectiveSessionKey(
-		context.channel,
-		message.user,
+		channelId,
+		message.user ?? "",
 		isDM,
 	);
 	incrementMessageCount(sessionKey);
@@ -343,8 +365,10 @@ export async function handleMessage(
 		message.thread_ts;
 
 	const streamState: StreamState = {
-		channelId: context.channel,
-		threadTs: shouldThread ? message.thread_ts || message.ts : undefined,
+		channelId,
+		threadTs: shouldThread
+			? ((message.thread_ts as string | undefined) ?? messageTs) || undefined
+			: undefined,
 		messageTs: "",
 		buffer: "",
 		lastEdit: 0,
@@ -359,10 +383,10 @@ export async function handleMessage(
 			thread_ts: streamState.threadTs,
 		});
 
-		streamState.messageTs = initialResponse.ts;
+		streamState.messageTs = initialResponse.ts ?? "";
 
-		startTyping(sessionKey, context.channel, streamState.messageTs, {
-			chatUpdate: (params) => app!.client.chat.update(params),
+		startTyping(sessionKey, channelId, streamState.messageTs, {
+			chatUpdate: (params) => slackApp.client.chat.update(params),
 			retryOpts: retryOpts("chat.update:typing"),
 			logger,
 		});
@@ -379,11 +403,19 @@ export async function handleMessage(
 				textContent = msg.content;
 			} else if (
 				(msg.type as string) === "assistant" &&
-				(msg as any).message?.content
+				(msg as unknown as Record<string, unknown>).message !== null &&
+				typeof (msg as unknown as Record<string, unknown>).message === "object"
 			) {
-				const content = (msg as any).message.content;
+				const content = (
+					(msg as unknown as Record<string, unknown>).message as Record<
+						string,
+						unknown
+					>
+				).content;
 				if (Array.isArray(content)) {
-					textContent = content.map((c: any) => c.text || "").join("");
+					textContent = (content as Record<string, unknown>[])
+						.map((c) => c.text || "")
+						.join("");
 				} else if (typeof content === "string") {
 					textContent = content;
 				}
@@ -426,7 +458,7 @@ export async function handleMessage(
 		) {
 			const attachmentPaths = await saveAttachments(
 				message.files as SlackFile[],
-				message.user,
+				message.user ?? "",
 				effectiveBotToken,
 				logger,
 			);
@@ -440,7 +472,7 @@ export async function handleMessage(
 				logger.info({
 					msg: "Attachments appended to message",
 					count: attachmentPaths.length,
-					channel: context.channel,
+					channel: channelId,
 				});
 			}
 		}
@@ -449,12 +481,12 @@ export async function handleMessage(
 			logger.warn({
 				msg: "Skipping inject — message content is empty after attachment handling",
 				user: message.user,
-				channel: context.channel,
+				channel: channelId,
 			});
 			try {
 				await withRetry(
 					() =>
-						app!.client.chat.delete({
+						slackApp.client.chat.delete({
 							channel: streamState.channelId,
 							ts: streamState.messageTs,
 						}),
@@ -466,7 +498,7 @@ export async function handleMessage(
 
 		const response = await ctx.inject(sessionKey, messageContent, {
 			from: message.user,
-			channel: { type: "slack", id: context.channel },
+			channel: { type: "slack", id: channelId },
 			onStream: handleChunk,
 		});
 
@@ -480,31 +512,31 @@ export async function handleMessage(
 		try {
 			await withRetry(
 				() =>
-					app!.client.reactions.remove({
-						channel: context.channel,
-						timestamp: message.ts,
+					slackApp.client.reactions.remove({
+						channel: channelId,
+						timestamp: messageTs,
 						name: ackEmoji.replace(/:/g, ""),
 					}),
 				retryOpts("reactions.remove:ack"),
 			);
 			await withRetry(
 				() =>
-					app!.client.reactions.add({
-						channel: context.channel,
-						timestamp: message.ts,
+					slackApp.client.reactions.add({
+						channel: channelId,
+						timestamp: messageTs,
 						name: "white_check_mark",
 					}),
 				retryOpts("reactions.add:success"),
 			);
 		} catch (_e) {}
-	} catch (error: any) {
+	} catch (error: unknown) {
 		stopTyping(sessionKey);
 		logger.error({ msg: "Inject failed", error: String(error) });
 
 		try {
 			await withRetry(
 				() =>
-					app!.client.chat.update({
+					slackApp.client.chat.update({
 						channel: streamState.channelId,
 						ts: streamState.messageTs,
 						text: "❌ Error processing your request. Please try again.",
@@ -516,18 +548,18 @@ export async function handleMessage(
 		try {
 			await withRetry(
 				() =>
-					app!.client.reactions.remove({
-						channel: context.channel,
-						timestamp: message.ts,
+					slackApp.client.reactions.remove({
+						channel: channelId,
+						timestamp: messageTs,
 						name: ackEmoji.replace(/:/g, ""),
 					}),
 				retryOpts("reactions.remove:ack-error"),
 			);
 			await withRetry(
 				() =>
-					app!.client.reactions.add({
-						channel: context.channel,
-						timestamp: message.ts,
+					slackApp.client.reactions.add({
+						channel: channelId,
+						timestamp: messageTs,
 						name: "x",
 					}),
 				retryOpts("reactions.add:error"),

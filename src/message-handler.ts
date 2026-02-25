@@ -367,7 +367,7 @@ export async function handleMessage(
 	const streamState: StreamState = {
 		channelId,
 		threadTs: shouldThread
-			? ((message.thread_ts as string | undefined) ?? (messageTs || undefined))
+			? ((message.thread_ts as string | undefined) || messageTs) || undefined
 			: undefined,
 		messageTs: "",
 		buffer: "",

@@ -128,6 +128,7 @@ const slackChannelProvider: ChannelProvider = {
 
 	async send(channelId: string, content: string): Promise<void> {
 		if (!app) throw new Error("Slack app not initialized");
+		const slackApp = app;
 		// Split content into chunks of SLACK_LIMIT chars
 		const chunks: string[] = [];
 		let remaining = content;
@@ -147,7 +148,10 @@ const slackChannelProvider: ChannelProvider = {
 			if (chunk.trim()) {
 				await withRetry(
 					() =>
-						app!.client.chat.postMessage({ channel: channelId, text: chunk }),
+						slackApp.client.chat.postMessage({
+							channel: channelId,
+							text: chunk,
+						}),
 					retryOpts("chat.postMessage:channelProvider"),
 				);
 			}
@@ -493,10 +497,11 @@ const plugin: WOPRPlugin = {
 		// Initialize Slack app
 		try {
 			app = await initSlackApp(config, logger);
+			const slackApp = app;
 
 			// Store bot user ID for mention detection
 			const authTest = await withRetry(
-				() => app!.client.auth.test(),
+				() => slackApp.client.auth.test(),
 				retryOpts("auth.test"),
 			);
 			const botUserId = authTest.user_id;
@@ -514,26 +519,27 @@ const plugin: WOPRPlugin = {
 			};
 
 			// Message handler
-			app.message(async ({ message, context, say }) => {
+			slackApp.message(async ({ message, context, say }) => {
 				const hasText = "text" in message && !!message.text;
+				const msgRecord = message as unknown as Record<string, unknown>;
 				const hasFiles =
 					"files" in message &&
-					Array.isArray((message as any).files) &&
-					(message as any).files.length > 0;
+					Array.isArray(msgRecord.files) &&
+					(msgRecord.files as unknown[]).length > 0;
 
 				// Skip messages with neither text nor files
 				if (!hasText && !hasFiles) return;
 
-				// Add bot user ID to context
-				(context as any).botUserId = botUserId;
+				// Add bot user ID to context — Context extends StringIndexed so this is valid
+				context.botUserId = botUserId;
 
-				await handleMessage(message as any, context, say, config, msgDeps);
+				await handleMessage(msgRecord, context, say, config, msgDeps);
 			});
 
 			// App mention handler
-			app.event("app_mention", async ({ event, context, say }) => {
+			slackApp.event("app_mention", async ({ event, context, say }) => {
 				await handleMessage(
-					event,
+					event as unknown as Record<string, unknown>,
 					{ ...context, channel: event.channel },
 					say,
 					config,
@@ -542,7 +548,7 @@ const plugin: WOPRPlugin = {
 			});
 
 			// Register slash commands
-			registerSlashCommands(app, () => ctx);
+			registerSlashCommands(slackApp, () => ctx);
 
 			// Start periodic cleanup of expired pairing codes
 			cleanupTimer = setInterval(() => cleanupExpiredPairings(), 5 * 60 * 1000);
@@ -550,16 +556,16 @@ const plugin: WOPRPlugin = {
 			// Start the app
 			const mode = config.mode || "socket";
 			if (mode === "socket") {
-				await app.start();
+				await slackApp.start();
 				logger.info("Slack Socket Mode started");
 			} else {
 				// HTTP mode - app is started by Express/Hono server elsewhere
 				logger.info("Slack HTTP mode configured");
 			}
-		} catch (error: any) {
+		} catch (error: unknown) {
 			logger.error({
 				msg: "Failed to initialize Slack app",
-				error: error.message,
+				error: error instanceof Error ? error.message : String(error),
 			});
 			throw error;
 		}

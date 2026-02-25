@@ -287,7 +287,14 @@ export async function approveUser(
 	ctx: WOPRPluginContext,
 	userId: string,
 ): Promise<void> {
-	const config = ctx.getConfig<Record<string, any>>();
+	interface MutableConfig {
+		channels?: {
+			slack?: {
+				dm?: { allowFrom?: string[] };
+			};
+		};
+	}
+	const config = ctx.getConfig<MutableConfig>();
 
 	// Ensure nested structure exists
 	if (!config.channels) config.channels = {};

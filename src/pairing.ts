@@ -309,7 +309,7 @@ export async function approveUser(
 		config.channels.slack.dm.allowFrom.push(userId);
 		try {
 			await ctx.saveConfig(config);
-		} catch (error) {
+		} catch (error: unknown) {
 			throw new Error(
 				`Failed to save config after approving user ${userId}: ${error instanceof Error ? error.message : String(error)}`,
 			);

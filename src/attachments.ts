@@ -41,11 +41,11 @@ export async function saveAttachments(
 		if (!existsSync(ATTACHMENTS_DIR)) {
 			mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 		}
-	} catch (err) {
+	} catch (error: unknown) {
 		logger.error({
 			msg: "Failed to create attachments directory",
 			dir: ATTACHMENTS_DIR,
-			error: String(err),
+			error: String(error),
 		});
 		return [];
 	}
@@ -90,12 +90,12 @@ export async function saveAttachments(
 				size: file.size,
 				mimetype: file.mimetype,
 			});
-		} catch (err) {
+		} catch (error: unknown) {
 			logger.error({
 				msg: "Error saving Slack attachment",
 				fileId: file.id,
 				name: file.name,
-				error: String(err),
+				error: String(error),
 			});
 		}
 	}

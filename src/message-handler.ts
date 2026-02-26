@@ -95,8 +95,8 @@ async function updateMessage(
 			deps.retryOpts("chat.update:stream"),
 		);
 		state.lastEdit = Date.now();
-	} catch (e) {
-		deps.logger.warn({ msg: "Failed to update message", error: String(e) });
+	} catch (error: unknown) {
+		deps.logger.warn({ msg: "Failed to update message", error: String(error) });
 	}
 }
 
@@ -127,8 +127,11 @@ async function finalizeMessage(
 				}),
 			deps.retryOpts("chat.update:finalize"),
 		);
-	} catch (e) {
-		deps.logger.warn({ msg: "Failed to finalize message", error: String(e) });
+	} catch (error: unknown) {
+		deps.logger.warn({
+			msg: "Failed to finalize message",
+			error: String(error),
+		});
 	}
 }
 
@@ -189,11 +192,11 @@ export async function shouldRespond(
 			if (request && ctx) {
 				try {
 					await approveUser(ctx, request.slackUserId);
-				} catch (e) {
+				} catch (error: unknown) {
 					logger.error({
 						msg: "Failed to approve user after pairing claim",
 						user: message.user,
-						error: String(e),
+						error: String(error),
 					});
 				}
 				logger.info({ msg: "Pairing claimed via DM", user: message.user });
@@ -234,8 +237,11 @@ export async function shouldRespond(
 					retryOpts("chat.postMessage:pairing"),
 				);
 			}
-		} catch (e) {
-			logger.warn({ msg: "Failed to send pairing message", error: String(e) });
+		} catch (error: unknown) {
+			logger.warn({
+				msg: "Failed to send pairing message",
+				error: String(error),
+			});
 		}
 
 		return false;
@@ -315,7 +321,7 @@ export async function handleMessage(
 				from: message.user,
 				channel: { type: "slack", id: channelId },
 			});
-		} catch (_e) {}
+		} catch (_error: unknown) {}
 		return;
 	}
 
@@ -325,10 +331,10 @@ export async function handleMessage(
 			await say({
 				text: "Your account has been paired. I'll respond to your messages from now on.",
 			});
-		} catch (e) {
+		} catch (error: unknown) {
 			logger.warn({
 				msg: "Failed to send pairing confirmation",
-				error: String(e),
+				error: String(error),
 			});
 		}
 		return;
@@ -346,8 +352,8 @@ export async function handleMessage(
 				}),
 			retryOpts("reactions.add:ack"),
 		);
-	} catch (e) {
-		logger.warn({ msg: "Failed to add reaction", error: String(e) });
+	} catch (error: unknown) {
+		logger.warn({ msg: "Failed to add reaction", error: String(error) });
 	}
 
 	const sessionKey = getEffectiveSessionKey(
@@ -490,7 +496,7 @@ export async function handleMessage(
 						}),
 					retryOpts("chat.delete:empty"),
 				);
-			} catch (_e) {}
+			} catch (_error: unknown) {}
 			return;
 		}
 
@@ -526,7 +532,7 @@ export async function handleMessage(
 					}),
 				retryOpts("reactions.add:success"),
 			);
-		} catch (_e) {}
+		} catch (_error: unknown) {}
 	} catch (error: unknown) {
 		stopTyping(sessionKey);
 		logger.error({ msg: "Inject failed", error: String(error) });
@@ -541,7 +547,7 @@ export async function handleMessage(
 					}),
 				retryOpts("chat.update:error"),
 			);
-		} catch (_e) {}
+		} catch (_error: unknown) {}
 
 		try {
 			await withRetry(
@@ -562,7 +568,7 @@ export async function handleMessage(
 					}),
 				retryOpts("reactions.add:error"),
 			);
-		} catch (_e) {}
+		} catch (_error: unknown) {}
 	} finally {
 		activeStreams.delete(sessionKey);
 	}

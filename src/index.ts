@@ -408,7 +408,7 @@ const plugin: WOPRPlugin = {
 		configSchema: {
 			title: "Slack Integration",
 			description: "Configure Slack bot integration",
-			fields: [],
+			fields: configSchema.fields,
 		},
 	},
 
@@ -474,8 +474,10 @@ const plugin: WOPRPlugin = {
 
 	async init(context: WOPRPluginContext) {
 		ctx = context;
-		if (ctx.registerConfigSchema)
+		if (ctx.registerConfigSchema) {
 			ctx.registerConfigSchema("wopr-plugin-slack", configSchema);
+			cleanups.push(() => ctx?.unregisterConfigSchema?.("wopr-plugin-slack"));
+		}
 
 		// Register as a channel provider so other plugins can add commands/parsers
 		ctx.registerChannelProvider(slackChannelProvider);

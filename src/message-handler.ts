@@ -367,7 +367,7 @@ export async function handleMessage(
 	const streamState: StreamState = {
 		channelId,
 		threadTs: shouldThread
-			? ((message.thread_ts as string | undefined) ?? messageTs) || undefined
+			? (message.thread_ts as string | undefined) || messageTs || undefined
 			: undefined,
 		messageTs: "",
 		buffer: "",
@@ -401,23 +401,21 @@ export async function handleMessage(
 			let textContent = "";
 			if (msg.type === "text" && msg.content) {
 				textContent = msg.content;
-			} else if (
-				(msg.type as string) === "assistant" &&
-				(msg as unknown as Record<string, unknown>).message !== null &&
-				typeof (msg as unknown as Record<string, unknown>).message === "object"
-			) {
-				const content = (
-					(msg as unknown as Record<string, unknown>).message as Record<
-						string,
-						unknown
-					>
-				).content;
-				if (Array.isArray(content)) {
-					textContent = (content as Record<string, unknown>[])
-						.map((c) => c.text || "")
-						.join("");
-				} else if (typeof content === "string") {
-					textContent = content;
+			} else if ((msg.type as string) === "assistant") {
+				const msgRecord = msg as unknown as Record<string, unknown>;
+				if (
+					msgRecord.message !== null &&
+					typeof msgRecord.message === "object"
+				) {
+					const content = (msgRecord.message as Record<string, unknown>)
+						.content;
+					if (Array.isArray(content)) {
+						textContent = (content as Record<string, unknown>[])
+							.map((c) => c.text || "")
+							.join("");
+					} else if (typeof content === "string") {
+						textContent = content;
+					}
 				}
 			}
 

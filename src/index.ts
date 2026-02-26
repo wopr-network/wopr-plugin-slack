@@ -72,6 +72,7 @@ let ctx: WOPRPluginContext | null = null;
 let agentIdentity: AgentIdentity = { name: "WOPR", emoji: "👀" };
 let cleanupTimer: NodeJS.Timeout | null = null;
 let retryConfig: RetryConfig = {};
+const cleanups: Array<() => void | Promise<void>> = [];
 
 /**
  * Build retry options with logging for a Slack API call
@@ -192,10 +193,10 @@ const slackExtension = {
 
 		try {
 			await approveUser(ctx, result.request.slackUserId);
-		} catch (e) {
+		} catch (error: unknown) {
 			return {
 				success: false,
-				error: `Failed to approve user: ${e instanceof Error ? e.message : String(e)}`,
+				error: `Failed to approve user: ${error instanceof Error ? error.message : String(error)}`,
 			};
 		}
 
@@ -227,6 +228,7 @@ const configSchema: ConfigSchema = {
 			default: "socket",
 			description:
 				"Socket Mode works through firewalls, HTTP requires public URL",
+			setupFlow: "none",
 		},
 		{
 			name: "botToken",
@@ -235,6 +237,8 @@ const configSchema: ConfigSchema = {
 			placeholder: "xoxb-...",
 			required: true,
 			description: "Bot User OAuth Token from Slack",
+			secret: true,
+			setupFlow: "paste",
 		},
 		{
 			name: "appToken",
@@ -243,6 +247,8 @@ const configSchema: ConfigSchema = {
 			placeholder: "xapp-...",
 			description:
 				"Required for Socket Mode (App-Level Token with connections:write)",
+			secret: true,
+			setupFlow: "paste",
 		},
 		{
 			name: "signingSecret",
@@ -250,6 +256,8 @@ const configSchema: ConfigSchema = {
 			label: "Signing Secret",
 			placeholder: "...",
 			description: "Required for HTTP mode (from Slack App Basic Info)",
+			secret: true,
+			setupFlow: "paste",
 		},
 		{
 			name: "clientId",
@@ -258,6 +266,8 @@ const configSchema: ConfigSchema = {
 			placeholder: "...",
 			description:
 				"OAuth Client ID for automatic token rotation (granular permissions)",
+			secret: true,
+			setupFlow: "paste",
 		},
 		{
 			name: "clientSecret",
@@ -266,6 +276,8 @@ const configSchema: ConfigSchema = {
 			placeholder: "...",
 			description:
 				"OAuth Client Secret for automatic token rotation (granular permissions)",
+			secret: true,
+			setupFlow: "paste",
 		},
 		{
 			name: "stateSecret",
@@ -273,6 +285,8 @@ const configSchema: ConfigSchema = {
 			label: "State Secret",
 			placeholder: "...",
 			description: "Secret for OAuth state verification (any random string)",
+			secret: true,
+			setupFlow: "paste",
 		},
 		{
 			name: "ackReaction",
@@ -281,6 +295,7 @@ const configSchema: ConfigSchema = {
 			placeholder: "👀",
 			default: "👀",
 			description: "Emoji to react with while processing",
+			setupFlow: "none",
 		},
 		{
 			name: "replyToMode",
@@ -293,6 +308,7 @@ const configSchema: ConfigSchema = {
 			],
 			default: "off",
 			description: "Control automatic threading of replies",
+			setupFlow: "none",
 		},
 		{
 			name: "dmPolicy",
@@ -305,12 +321,14 @@ const configSchema: ConfigSchema = {
 			],
 			default: "pairing",
 			description: "How to handle direct messages from unknown users",
+			setupFlow: "none",
 		},
 		{
 			name: "enabled",
 			type: "checkbox",
 			label: "Enabled",
 			default: true,
+			setupFlow: "none",
 		},
 		{
 			name: "retryMaxRetries",
@@ -319,6 +337,7 @@ const configSchema: ConfigSchema = {
 			placeholder: "3",
 			default: "3",
 			description: "Maximum number of retries for rate-limited API calls",
+			setupFlow: "none",
 		},
 		{
 			name: "retryBaseDelay",
@@ -327,6 +346,7 @@ const configSchema: ConfigSchema = {
 			placeholder: "1000",
 			default: "1000",
 			description: "Base delay in milliseconds for exponential backoff",
+			setupFlow: "none",
 		},
 		{
 			name: "retryMaxDelay",
@@ -335,6 +355,7 @@ const configSchema: ConfigSchema = {
 			placeholder: "30000",
 			default: "30000",
 			description: "Maximum delay in milliseconds between retries",
+			setupFlow: "none",
 		},
 	],
 };
@@ -353,8 +374,8 @@ async function refreshIdentity() {
 			agentIdentity = { ...agentIdentity, ...identity };
 			logger.info({ msg: "Identity refreshed", identity: agentIdentity });
 		}
-	} catch (e) {
-		logger.warn({ msg: "Failed to refresh identity", error: String(e) });
+	} catch (error: unknown) {
+		logger.warn({ msg: "Failed to refresh identity", error: String(error) });
 	}
 }
 
@@ -362,6 +383,34 @@ const plugin: WOPRPlugin = {
 	name: "wopr-plugin-slack",
 	version: "1.0.0",
 	description: "Slack integration with Socket Mode and HTTP webhook support",
+
+	manifest: {
+		name: "wopr-plugin-slack",
+		version: "1.0.0",
+		description: "Slack integration with Socket Mode and HTTP webhook support",
+		capabilities: ["channel"],
+		category: "channel",
+		tags: ["slack", "chat", "messaging", "channel"],
+		icon: ":speech_balloon:",
+		requires: {},
+		provides: {
+			capabilities: [
+				{
+					type: "channel",
+					id: "slack",
+					displayName: "Slack",
+				},
+			],
+		},
+		lifecycle: {
+			shutdownBehavior: "graceful",
+		},
+		configSchema: {
+			title: "Slack Integration",
+			description: "Configure Slack bot integration",
+			fields: [],
+		},
+	},
 
 	commands: [
 		{
@@ -405,7 +454,7 @@ const plugin: WOPRPlugin = {
 							);
 							process.exit(1);
 						}
-					} catch (_err) {
+					} catch (_error: unknown) {
 						console.log(
 							"Error: Could not connect to WOPR daemon. Is it running?",
 						);
@@ -425,15 +474,18 @@ const plugin: WOPRPlugin = {
 
 	async init(context: WOPRPluginContext) {
 		ctx = context;
-		ctx.registerConfigSchema("wopr-plugin-slack", configSchema);
+		if (ctx.registerConfigSchema)
+			ctx.registerConfigSchema("wopr-plugin-slack", configSchema);
 
 		// Register as a channel provider so other plugins can add commands/parsers
 		ctx.registerChannelProvider(slackChannelProvider);
 		logger.info("Registered Slack channel provider");
+		cleanups.push(() => ctx?.unregisterChannelProvider("slack"));
 
 		// Register the Slack extension so other plugins can interact with Slack
 		ctx.registerExtension("slack", slackExtension);
 		logger.info("Registered Slack extension");
+		cleanups.push(() => ctx?.unregisterExtension("slack"));
 
 		// Load agent identity
 		await refreshIdentity();
@@ -552,6 +604,12 @@ const plugin: WOPRPlugin = {
 
 			// Start periodic cleanup of expired pairing codes
 			cleanupTimer = setInterval(() => cleanupExpiredPairings(), 5 * 60 * 1000);
+			cleanups.push(() => {
+				if (cleanupTimer) {
+					clearInterval(cleanupTimer);
+					cleanupTimer = null;
+				}
+			});
 
 			// Start the app
 			const mode = config.mode || "socket";
@@ -573,18 +631,24 @@ const plugin: WOPRPlugin = {
 
 	async shutdown() {
 		stopAllTyping();
-		if (cleanupTimer) {
-			clearInterval(cleanupTimer);
-			cleanupTimer = null;
+		if (!ctx) return;
+		for (const fn of cleanups) {
+			try {
+				await fn();
+			} catch (error: unknown) {
+				logger.warn({
+					msg: "Cleanup error during shutdown",
+					error: String(error),
+				});
+			}
 		}
-		if (ctx) {
-			ctx.unregisterChannelProvider("slack");
-			ctx.unregisterExtension("slack");
-		}
+		cleanups.length = 0;
 		if (app) {
 			await app.stop();
+			app = null;
 			logger.info("Slack plugin stopped");
 		}
+		ctx = null;
 	},
 };
 

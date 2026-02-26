@@ -261,7 +261,7 @@ export function registerSlashCommands(
 			}
 
 			await respond({ response_type: "ephemeral", text: response });
-		} catch {
+		} catch (_error: unknown) {
 			await respond({
 				response_type: "ephemeral",
 				text: "Failed to compact session.",
@@ -427,10 +427,10 @@ export function registerSlashCommands(
 					model: resolved.id,
 				});
 				state.model = resolved.id;
-			} catch (err) {
+			} catch (error: unknown) {
 				await respond({
 					response_type: "ephemeral",
-					text: `Failed to switch model: ${err instanceof Error ? err.message : String(err)}`,
+					text: `Failed to switch model: ${error instanceof Error ? error.message : String(error)}`,
 				});
 				return;
 			}

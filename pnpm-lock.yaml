@@ -12,8 +12,8 @@ importers:
         specifier: ^4.6.0
         version: 4.6.0(@types/express@5.0.6)
       '@wopr-network/plugin-types':
-        specifier: ^0.5.0
-        version: 0.5.0(zod@3.25.76)
+        specifier: ^0.7.0
+        version: 0.7.0(zod@3.25.76)
       winston:
         specifier: ^3.11.0
         version: 3.19.0
@@ -445,6 +445,9 @@ packages:
   '@types/node@25.3.0':
     resolution: {integrity: sha512-4K3bqJpXpqfg2XKGK9bpDTc6xO/xoUP/RBWS7AtRMug6zZFaRekiLzjVtAoZMquxoAbzBvy5nxQ7veS5eYzf8A==}
 
+  '@types/node@25.3.2':
+    resolution: {integrity: sha512-RpV6r/ij22zRRdyBPcxDeKAzH43phWVKEjL2iksqo1Vz3CuBUrgmPpPhALKiRfU7OMCmeeO9vECBMsV0hMTG8Q==}
+
   '@types/qs@6.14.0':
     resolution: {integrity: sha512-eOunJqu0K1923aExK6y8p6fsihYEn/BYuQ4g0CxAAgFc4b/ZLN4CrsRZ55srTdqoiLzU2B2evC+apEIxprEzkQ==}
 
@@ -495,8 +498,8 @@ packages:
   '@vitest/utils@4.0.18':
     resolution: {integrity: sha512-msMRKLMVLWygpK3u2Hybgi4MNjcYJvwTb0Ru09+fOyCXIgT5raYP041DRRdiJiI3k/2U6SEbAETB3YtBrUkCFA==}
 
-  '@wopr-network/plugin-types@0.5.0':
-    resolution: {integrity: sha512-auKJSvDewYlLL3gcabqomkCxz/UhYAsirb6dHh+jmuZ5mZcPy4sOkKjNHJfrk07FbXlbVOSHu46qshWyGI0uXQ==}
+  '@wopr-network/plugin-types@0.7.0':
+    resolution: {integrity: sha512-AwayQemZrNez1VAyIgzGJ+CO7J6U1K3ihlOgYReEdBoNwCsOepv0gAdCoFEa8gUKONROOj/No6bdEQj2Tj7M/w==}
     peerDependencies:
       zod: ^4.3.6
 
@@ -1435,7 +1438,7 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 25.3.0
+      '@types/node': 25.3.2
 
   '@types/chai@5.2.3':
     dependencies:
@@ -1444,7 +1447,7 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 25.3.0
+      '@types/node': 25.3.2
 
   '@types/deep-eql@4.0.2': {}
 
@@ -1452,7 +1455,7 @@ snapshots:
 
   '@types/express-serve-static-core@5.1.1':
     dependencies:
-      '@types/node': 25.3.0
+      '@types/node': 25.3.2
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -1476,6 +1479,10 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
+  '@types/node@25.3.2':
+    dependencies:
+      undici-types: 7.18.2
+
   '@types/qs@6.14.0': {}
 
   '@types/range-parser@1.2.7': {}
@@ -1484,12 +1491,12 @@ snapshots:
 
   '@types/send@1.2.1':
     dependencies:
-      '@types/node': 25.3.0
+      '@types/node': 25.3.2
 
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 25.3.0
+      '@types/node': 25.3.2
 
   '@types/triple-beam@1.3.5': {}
 
@@ -1536,7 +1543,7 @@ snapshots:
       '@vitest/pretty-format': 4.0.18
       tinyrainbow: 3.0.3
 
-  '@wopr-network/plugin-types@0.5.0(zod@3.25.76)':
+  '@wopr-network/plugin-types@0.7.0(zod@3.25.76)':
     dependencies:
       zod: 3.25.76
 

@@ -403,6 +403,8 @@ const plugin: WOPRPlugin = {
         if (subcommand === "claim") {
           const code = rest[0];
           if (!code) {
+            console.error("Usage: wopr slack claim <code>");
+            console.error("  Claim a pairing code to approve your Slack account");
             process.exit(1);
           }
 
@@ -420,14 +422,21 @@ const plugin: WOPRPlugin = {
             };
 
             if (result.success) {
+              console.info("Slack account paired successfully!");
+              console.info(`  User: ${result.username} (${result.userId})`);
               process.exit(0);
             } else {
+              console.error(`Failed to claim: ${result.error ?? "Unknown error"}`);
               process.exit(1);
             }
           } catch (_error: unknown) {
+            console.error("Error: Could not connect to WOPR daemon. Is it running?");
+            console.error("  Start it with: wopr daemon start");
             process.exit(1);
           }
         } else {
+          console.info("Slack plugin commands:");
+          console.info("  wopr slack claim <code>  - Claim a pairing code to approve your Slack account");
           process.exit(subcommand ? 1 : 0);
         }
       },

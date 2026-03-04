@@ -5,6 +5,7 @@
  * Uses @slack/bolt for robust event handling.
  */
 
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { App } from "@slack/bolt";
 import winston from "winston";
@@ -78,13 +79,26 @@ function retryOpts(label: string) {
   };
 }
 
+function escapeMrkdwn(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 // ============================================================================
 // Channel Provider (cross-plugin command/parser registration)
 // ============================================================================
 
 const registeredCommands: Map<string, ChannelCommand> = new Map();
 const registeredParsers: Map<string, ChannelMessageParser> = new Map();
-const pendingNotifications = new Map<string, ChannelNotificationCallbacks>();
+
+const NOTIFICATION_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+interface PendingNotification {
+  callbacks: ChannelNotificationCallbacks;
+  channelId: string;
+  createdAt: number;
+}
+
+const pendingNotifications = new Map<string, PendingNotification>();
 
 const slackChannelProvider: SlackChannelProvider = {
   id: "slack",
@@ -155,11 +169,14 @@ const slackChannelProvider: SlackChannelProvider = {
     payload: ChannelNotificationPayload,
     callbacks?: ChannelNotificationCallbacks,
   ): Promise<void> {
-    if (payload.type !== "friend-request") return;
+    if (payload.type !== "friend-request") {
+      logger.warn({ msg: "SlackChannelProvider.sendNotification: unsupported payload type", type: payload.type });
+      return;
+    }
     if (!app) throw new Error("Slack app not initialized");
     const slackApp = app;
 
-    const fromLabel = payload.from || payload.pubkey || "unknown peer";
+    const fromLabel = escapeMrkdwn(payload.from || payload.pubkey || "unknown peer");
     const text = `Friend request from *${fromLabel}*`;
 
     const blocks = [
@@ -173,6 +190,7 @@ const slackChannelProvider: SlackChannelProvider = {
     ];
 
     if (callbacks) {
+      const nonce = randomUUID();
       blocks.push({
         type: "actions",
         elements: [
@@ -181,30 +199,41 @@ const slackChannelProvider: SlackChannelProvider = {
             text: { type: "plain_text", text: "Accept" },
             style: "primary",
             action_id: "notification_accept",
+            value: nonce,
           },
           {
             type: "button",
             text: { type: "plain_text", text: "Deny" },
             style: "danger",
             action_id: "notification_deny",
+            value: nonce,
           },
         ],
       } as never);
-    }
 
-    const result = await withRetry(
-      () =>
-        slackApp.client.chat.postMessage({
-          channel: channelId,
-          text,
-          // biome-ignore lint/suspicious/noExplicitAny: bolt block types require complex discriminated unions
-          blocks: blocks as any,
-        }),
-      retryOpts("chat.postMessage:notification"),
-    );
+      await withRetry(
+        () =>
+          slackApp.client.chat.postMessage({
+            channel: channelId,
+            text,
+            // biome-ignore lint/suspicious/noExplicitAny: bolt block types require complex discriminated unions
+            blocks: blocks as any,
+          }),
+        retryOpts("chat.postMessage:notification"),
+      );
 
-    if (callbacks && result.ts) {
-      pendingNotifications.set(result.ts as string, callbacks);
+      pendingNotifications.set(nonce, { callbacks, channelId, createdAt: Date.now() });
+    } else {
+      await withRetry(
+        () =>
+          slackApp.client.chat.postMessage({
+            channel: channelId,
+            text,
+            // biome-ignore lint/suspicious/noExplicitAny: bolt block types require complex discriminated unions
+            blocks: blocks as any,
+          }),
+        retryOpts("chat.postMessage:notification"),
+      );
     }
   },
 };
@@ -620,13 +649,15 @@ const plugin: WOPRPlugin = {
       // Register action handlers for friend request notifications
       slackApp.action("notification_accept", async ({ ack, body }) => {
         await ack();
-        const ts = (body as unknown as { message?: { ts?: string } }).message?.ts;
-        if (!ts) return;
-        const callbacks = pendingNotifications.get(ts);
-        if (callbacks) {
-          pendingNotifications.delete(ts);
+        const nonce = (body as unknown as { actions?: Array<{ value?: string }> }).actions?.[0]?.value;
+        const incomingChannelId = (body as unknown as { channel?: { id?: string } }).channel?.id;
+        if (!nonce) return;
+        const pending = pendingNotifications.get(nonce);
+        if (pending) {
+          if (incomingChannelId && pending.channelId !== incomingChannelId) return;
+          pendingNotifications.delete(nonce);
           try {
-            await callbacks.onAccept?.();
+            await pending.callbacks.onAccept?.();
           } catch (error: unknown) {
             logger.error({ msg: "Error in notification_accept callback", error: String(error) });
           }
@@ -635,13 +666,15 @@ const plugin: WOPRPlugin = {
 
       slackApp.action("notification_deny", async ({ ack, body }) => {
         await ack();
-        const ts = (body as unknown as { message?: { ts?: string } }).message?.ts;
-        if (!ts) return;
-        const callbacks = pendingNotifications.get(ts);
-        if (callbacks) {
-          pendingNotifications.delete(ts);
+        const nonce = (body as unknown as { actions?: Array<{ value?: string }> }).actions?.[0]?.value;
+        const incomingChannelId = (body as unknown as { channel?: { id?: string } }).channel?.id;
+        if (!nonce) return;
+        const pending = pendingNotifications.get(nonce);
+        if (pending) {
+          if (incomingChannelId && pending.channelId !== incomingChannelId) return;
+          pendingNotifications.delete(nonce);
           try {
-            await callbacks.onDeny?.();
+            await pending.callbacks.onDeny?.();
           } catch (error: unknown) {
             logger.error({ msg: "Error in notification_deny callback", error: String(error) });
           }
@@ -651,8 +684,19 @@ const plugin: WOPRPlugin = {
       // Register slash commands
       registerSlashCommands(slackApp, () => ctx);
 
-      // Start periodic cleanup of expired pairing codes
-      cleanupTimer = setInterval(() => cleanupExpiredPairings(), 5 * 60 * 1000);
+      // Start periodic cleanup of expired pairing codes and stale notifications
+      cleanupTimer = setInterval(
+        () => {
+          cleanupExpiredPairings();
+          const now = Date.now();
+          for (const [nonce, pending] of pendingNotifications) {
+            if (now - pending.createdAt > NOTIFICATION_TTL_MS) {
+              pendingNotifications.delete(nonce);
+            }
+          }
+        },
+        5 * 60 * 1000,
+      );
       cleanups.push(() => {
         if (cleanupTimer) {
           clearInterval(cleanupTimer);
@@ -680,6 +724,7 @@ const plugin: WOPRPlugin = {
 
   async shutdown() {
     stopAllTyping();
+    pendingNotifications.clear();
     if (!ctx) return;
     for (const fn of cleanups) {
       try {

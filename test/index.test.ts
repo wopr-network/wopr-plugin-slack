@@ -681,7 +681,6 @@ describe("plugin default export", () => {
 
 		it("posts friend request with Accept/Deny buttons when callbacks provided", async () => {
 			mockChatPostMessage.mockResolvedValue({ ts: "notif_ts" });
-			await initPlugin();
 
 			// Access slackChannelProvider via the registered channel provider
 			const { default: plugin } = await import("../src/index.js");

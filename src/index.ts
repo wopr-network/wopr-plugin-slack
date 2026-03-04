@@ -660,7 +660,7 @@ const plugin: WOPRPlugin = {
       });
 
       // Register action handlers for friend request notifications
-      slackApp.action("notification_accept", async ({ ack, body }) => {
+      slackApp.action("notification_accept", async ({ ack, body, respond }) => {
         await ack();
         const nonce = (body as unknown as { actions?: Array<{ value?: string }> }).actions?.[0]?.value;
         const incomingChannelId = (body as unknown as { channel?: { id?: string } }).channel?.id;
@@ -669,17 +669,24 @@ const plugin: WOPRPlugin = {
         if (pending) {
           if (incomingChannelId && pending.channelId !== incomingChannelId) return;
           const clickerId = (body as unknown as { user?: { id?: string } }).user?.id;
-          if (pending.expectedUserId && clickerId !== pending.expectedUserId) return;
+          if (pending.expectedUserId && clickerId !== pending.expectedUserId) {
+            await respond({
+              response_type: "ephemeral",
+              text: "You are not authorized to respond to this notification.",
+            });
+            return;
+          }
           pendingNotifications.delete(nonce);
           try {
             await pending.callbacks.onAccept?.();
           } catch (error: unknown) {
             logger.error({ msg: "Error in notification_accept callback", error: String(error) });
           }
+          await respond({ text: "Friend request accepted.", replace_original: true });
         }
       });
 
-      slackApp.action("notification_deny", async ({ ack, body }) => {
+      slackApp.action("notification_deny", async ({ ack, body, respond }) => {
         await ack();
         const nonce = (body as unknown as { actions?: Array<{ value?: string }> }).actions?.[0]?.value;
         const incomingChannelId = (body as unknown as { channel?: { id?: string } }).channel?.id;
@@ -688,13 +695,20 @@ const plugin: WOPRPlugin = {
         if (pending) {
           if (incomingChannelId && pending.channelId !== incomingChannelId) return;
           const clickerId = (body as unknown as { user?: { id?: string } }).user?.id;
-          if (pending.expectedUserId && clickerId !== pending.expectedUserId) return;
+          if (pending.expectedUserId && clickerId !== pending.expectedUserId) {
+            await respond({
+              response_type: "ephemeral",
+              text: "You are not authorized to respond to this notification.",
+            });
+            return;
+          }
           pendingNotifications.delete(nonce);
           try {
             await pending.callbacks.onDeny?.();
           } catch (error: unknown) {
             logger.error({ msg: "Error in notification_deny callback", error: String(error) });
           }
+          await respond({ text: "Friend request denied.", replace_original: true });
         }
       });
 

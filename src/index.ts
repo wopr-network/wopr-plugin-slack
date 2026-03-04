@@ -96,6 +96,7 @@ interface PendingNotification {
   callbacks: ChannelNotificationCallbacks;
   channelId: string;
   createdAt: number;
+  expectedUserId?: string;
 }
 
 const pendingNotifications = new Map<string, PendingNotification>();
@@ -222,7 +223,19 @@ const slackChannelProvider: SlackChannelProvider = {
         retryOpts("chat.postMessage:notification"),
       );
 
-      pendingNotifications.set(nonce, { callbacks, channelId, createdAt: Date.now() });
+      // Look up the DM channel owner so action handlers can validate the clicker
+      let expectedUserId: string | undefined;
+      try {
+        const membersResp = await slackApp.client.conversations.members({ channel: channelId, limit: 2 });
+        // For a DM, members contains the two users (bot + owner). Find the non-bot user.
+        const members = (membersResp.members as string[] | undefined) ?? [];
+        const authResp = await slackApp.client.auth.test();
+        const botId = authResp.user_id as string | undefined;
+        expectedUserId = members.find((m) => m !== botId);
+      } catch {
+        // Non-fatal: fall back to channel-only validation
+      }
+      pendingNotifications.set(nonce, { callbacks, channelId, createdAt: Date.now(), expectedUserId });
     } else {
       await withRetry(
         () =>
@@ -655,6 +668,8 @@ const plugin: WOPRPlugin = {
         const pending = pendingNotifications.get(nonce);
         if (pending) {
           if (incomingChannelId && pending.channelId !== incomingChannelId) return;
+          const clickerId = (body as unknown as { user?: { id?: string } }).user?.id;
+          if (pending.expectedUserId && clickerId !== pending.expectedUserId) return;
           pendingNotifications.delete(nonce);
           try {
             await pending.callbacks.onAccept?.();
@@ -672,6 +687,8 @@ const plugin: WOPRPlugin = {
         const pending = pendingNotifications.get(nonce);
         if (pending) {
           if (incomingChannelId && pending.channelId !== incomingChannelId) return;
+          const clickerId = (body as unknown as { user?: { id?: string } }).user?.id;
+          if (pending.expectedUserId && clickerId !== pending.expectedUserId) return;
           pendingNotifications.delete(nonce);
           try {
             await pending.callbacks.onDeny?.();

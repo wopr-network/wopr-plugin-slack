@@ -73,6 +73,7 @@ vi.mock("@slack/bolt", () => {
 		message = sharedBoltMocks.message;
 		event = sharedBoltMocks.event;
 		command = sharedBoltMocks.command;
+		action = vi.fn();
 		client = {
 			auth: { test: sharedBoltMocks.authTest },
 			reactions: { add: sharedBoltMocks.reactionsAdd, remove: sharedBoltMocks.reactionsRemove },

@@ -6,6 +6,7 @@ const mockStop = vi.fn();
 const mockMessage = vi.fn();
 const mockEvent = vi.fn();
 const mockCommand = vi.fn();
+const mockAction = vi.fn();
 const mockAuthTest = vi.fn().mockResolvedValue({ user_id: "UBOT123" });
 const mockReactionsAdd = vi.fn();
 const mockReactionsRemove = vi.fn();
@@ -23,6 +24,7 @@ vi.mock("@slack/bolt", () => {
 		message = mockMessage;
 		event = mockEvent;
 		command = mockCommand;
+		action = mockAction;
 		client = {
 			auth: { test: mockAuthTest },
 			reactions: { add: mockReactionsAdd, remove: mockReactionsRemove },
@@ -142,6 +144,7 @@ describe("plugin default export", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		appConstructorCalls = [];
+		mockAction.mockReset();
 	});
 
 	it("exports a valid WOPRPlugin shape", async () => {
@@ -650,6 +653,130 @@ describe("plugin default export", () => {
 				"just passing by",
 				expect.objectContaining({ from: "U_LOG_1" }),
 			);
+		});
+	});
+
+	describe("sendNotification", () => {
+		async function initPlugin() {
+			const { default: plugin } = await import("../src/index.js");
+			const ctx = mockContext({
+				channels: {
+					slack: {
+						enabled: true,
+						botToken: "xoxb-test",
+						appToken: "xapp-test",
+						mode: "socket",
+					},
+				},
+			});
+			await plugin.init!(ctx);
+			return { plugin, ctx };
+		}
+
+		it("registers action handlers for notification_accept and notification_deny", async () => {
+			await initPlugin();
+			expect(mockAction).toHaveBeenCalledWith("notification_accept", expect.any(Function));
+			expect(mockAction).toHaveBeenCalledWith("notification_deny", expect.any(Function));
+		});
+
+		it("posts friend request with Accept/Deny buttons when callbacks provided", async () => {
+			mockChatPostMessage.mockResolvedValue({ ts: "notif_ts" });
+			await initPlugin();
+
+			// Access slackChannelProvider via the registered channel provider
+			const { default: plugin } = await import("../src/index.js");
+			const ctx = mockContext({
+				channels: {
+					slack: {
+						enabled: true,
+						botToken: "xoxb-test",
+						appToken: "xapp-test",
+						mode: "socket",
+					},
+				},
+			});
+			const registeredProvider = { sendNotification: vi.fn() };
+			ctx.registerChannelProvider = vi.fn((p: any) => {
+				Object.assign(registeredProvider, p);
+			});
+			await plugin.init!(ctx);
+
+			const onAccept = vi.fn();
+			const onDeny = vi.fn();
+			await registeredProvider.sendNotification(
+				"C_NOTIF",
+				{ type: "friend-request", from: "alice" },
+				{ onAccept, onDeny },
+			);
+
+			expect(mockChatPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					channel: "C_NOTIF",
+					text: expect.stringContaining("alice"),
+					blocks: expect.arrayContaining([
+						expect.objectContaining({ type: "actions" }),
+					]),
+				}),
+			);
+		});
+
+		it("posts friend request without buttons when no callbacks provided", async () => {
+			mockChatPostMessage.mockResolvedValue({ ts: "notif_ts2" });
+
+			const { default: plugin } = await import("../src/index.js");
+			const ctx = mockContext({
+				channels: {
+					slack: {
+						enabled: true,
+						botToken: "xoxb-test",
+						appToken: "xapp-test",
+						mode: "socket",
+					},
+				},
+			});
+			const registeredProvider = { sendNotification: vi.fn() };
+			ctx.registerChannelProvider = vi.fn((p: any) => {
+				Object.assign(registeredProvider, p);
+			});
+			await plugin.init!(ctx);
+
+			await registeredProvider.sendNotification("C_NOTIF2", {
+				type: "friend-request",
+				from: "bob",
+			});
+
+			expect(mockChatPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					channel: "C_NOTIF2",
+					text: expect.stringContaining("bob"),
+				}),
+			);
+			// No actions block when no callbacks
+			const call = mockChatPostMessage.mock.calls[0]?.[0];
+			const blocks = call?.blocks ?? [];
+			expect(blocks.every((b: any) => b.type !== "actions")).toBe(true);
+		});
+
+		it("ignores non-friend-request notification types", async () => {
+			const { default: plugin } = await import("../src/index.js");
+			const ctx = mockContext({
+				channels: {
+					slack: {
+						enabled: true,
+						botToken: "xoxb-test",
+						appToken: "xapp-test",
+						mode: "socket",
+					},
+				},
+			});
+			const registeredProvider = { sendNotification: vi.fn() };
+			ctx.registerChannelProvider = vi.fn((p: any) => {
+				Object.assign(registeredProvider, p);
+			});
+			await plugin.init!(ctx);
+
+			await registeredProvider.sendNotification("C_NOTIF3", { type: "other-type" });
+			expect(mockChatPostMessage).not.toHaveBeenCalled();
 		});
 	});
 });

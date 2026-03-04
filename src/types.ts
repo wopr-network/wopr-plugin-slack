@@ -25,6 +25,48 @@ export type {
   WOPRPluginContext,
 } from "@wopr-network/plugin-types";
 
+/**
+ * Extended ChannelProvider with notification support (pending upstream release).
+ */
+export interface SlackChannelProvider {
+  id: string;
+  registerCommand(cmd: import("@wopr-network/plugin-types").ChannelCommand): void;
+  unregisterCommand(name: string): void;
+  getCommands(): import("@wopr-network/plugin-types").ChannelCommand[];
+  addMessageParser(parser: import("@wopr-network/plugin-types").ChannelMessageParser): void;
+  removeMessageParser(id: string): void;
+  getMessageParsers(): import("@wopr-network/plugin-types").ChannelMessageParser[];
+  send(channel: string, content: string): Promise<void>;
+  getBotUsername(): string;
+  sendNotification(
+    channelId: string,
+    payload: ChannelNotificationPayload,
+    callbacks?: ChannelNotificationCallbacks,
+  ): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Notification types (pending upstream release in @wopr-network/plugin-types)
+// ---------------------------------------------------------------------------
+
+/**
+ * Payload describing a notification to display to the channel owner.
+ */
+export interface ChannelNotificationPayload {
+  type: string;
+  from?: string;
+  pubkey?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Callbacks invoked when the owner responds to a notification.
+ */
+export interface ChannelNotificationCallbacks {
+  onAccept?: () => void | Promise<void>;
+  onDeny?: () => void | Promise<void>;
+}
+
 // ---------------------------------------------------------------------------
 // Plugin-specific types (not in the shared package)
 // ---------------------------------------------------------------------------

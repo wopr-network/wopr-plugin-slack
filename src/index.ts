@@ -17,9 +17,11 @@ import type {
   AgentIdentity,
   ChannelCommand,
   ChannelMessageParser,
-  ChannelProvider,
+  ChannelNotificationCallbacks,
+  ChannelNotificationPayload,
   ConfigSchema,
   RetryConfig,
+  SlackChannelProvider,
   SlackConfig,
   WOPRPlugin,
   WOPRPluginContext,
@@ -82,8 +84,9 @@ function retryOpts(label: string) {
 
 const registeredCommands: Map<string, ChannelCommand> = new Map();
 const registeredParsers: Map<string, ChannelMessageParser> = new Map();
+const pendingNotifications = new Map<string, ChannelNotificationCallbacks>();
 
-const slackChannelProvider: ChannelProvider = {
+const slackChannelProvider: SlackChannelProvider = {
   id: "slack",
 
   registerCommand(cmd: ChannelCommand): void {
@@ -145,6 +148,64 @@ const slackChannelProvider: ChannelProvider = {
 
   getBotUsername(): string {
     return botUsername || "unknown";
+  },
+
+  async sendNotification(
+    channelId: string,
+    payload: ChannelNotificationPayload,
+    callbacks?: ChannelNotificationCallbacks,
+  ): Promise<void> {
+    if (payload.type !== "friend-request") return;
+    if (!app) throw new Error("Slack app not initialized");
+    const slackApp = app;
+
+    const fromLabel = payload.from || payload.pubkey || "unknown peer";
+    const text = `Friend request from *${fromLabel}*`;
+
+    const blocks = [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text,
+        },
+      },
+    ];
+
+    if (callbacks) {
+      blocks.push({
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Accept" },
+            style: "primary",
+            action_id: "notification_accept",
+          },
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Deny" },
+            style: "danger",
+            action_id: "notification_deny",
+          },
+        ],
+      } as never);
+    }
+
+    const result = await withRetry(
+      () =>
+        slackApp.client.chat.postMessage({
+          channel: channelId,
+          text,
+          // biome-ignore lint/suspicious/noExplicitAny: bolt block types require complex discriminated unions
+          blocks: blocks as any,
+        }),
+      retryOpts("chat.postMessage:notification"),
+    );
+
+    if (callbacks && result.ts) {
+      pendingNotifications.set(result.ts as string, callbacks);
+    }
   },
 };
 
@@ -442,7 +503,7 @@ const plugin: WOPRPlugin = {
     }
 
     // Register as a channel provider so other plugins can add commands/parsers
-    ctx.registerChannelProvider(slackChannelProvider);
+    ctx.registerChannelProvider(slackChannelProvider as import("@wopr-network/plugin-types").ChannelProvider);
     logger.info("Registered Slack channel provider");
     cleanups.push(() => ctx?.unregisterChannelProvider("slack"));
 
@@ -554,6 +615,37 @@ const plugin: WOPRPlugin = {
           config,
           msgDeps,
         );
+      });
+
+      // Register action handlers for friend request notifications
+      slackApp.action("notification_accept", async ({ ack, body }) => {
+        await ack();
+        const ts = (body as unknown as { message?: { ts?: string } }).message?.ts;
+        if (!ts) return;
+        const callbacks = pendingNotifications.get(ts);
+        if (callbacks) {
+          pendingNotifications.delete(ts);
+          try {
+            await callbacks.onAccept?.();
+          } catch (error: unknown) {
+            logger.error({ msg: "Error in notification_accept callback", error: String(error) });
+          }
+        }
+      });
+
+      slackApp.action("notification_deny", async ({ ack, body }) => {
+        await ack();
+        const ts = (body as unknown as { message?: { ts?: string } }).message?.ts;
+        if (!ts) return;
+        const callbacks = pendingNotifications.get(ts);
+        if (callbacks) {
+          pendingNotifications.delete(ts);
+          try {
+            await callbacks.onDeny?.();
+          } catch (error: unknown) {
+            logger.error({ msg: "Error in notification_deny callback", error: String(error) });
+          }
+        }
       });
 
       // Register slash commands

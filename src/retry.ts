@@ -140,4 +140,4 @@ export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions =
   throw lastError;
 }
 
-export { isRateLimitError, isTransientError, calculateDelay };
+export { calculateDelay, isRateLimitError, isTransientError };

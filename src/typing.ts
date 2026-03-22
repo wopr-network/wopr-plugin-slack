@@ -143,4 +143,4 @@ export function stopAllTyping(): void {
 }
 
 // Export constants for testing
-export { TYPING_REFRESH_MS, TYPING_IDLE_TIMEOUT_MS, TYPING_FRAMES };
+export { TYPING_FRAMES, TYPING_IDLE_TIMEOUT_MS, TYPING_REFRESH_MS };
